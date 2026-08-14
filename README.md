@@ -7,7 +7,7 @@ Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 
 - `src/app`: az alkalmazás vezérlése
 - `src/audio`: audio-vezérlés és HTTP M3U lejátszás
-- `lib/MaleksmAudioI2S`: a yoRadio-ból átvett, PSRAM-ra hangolt audio-motor
+- `lib/MaleksmAudioI2S`: a yoRadio maleksm-mod-ból átvett, PSRAM-ra hangolt audio-motor
 - `src/display`: kijelző, érintés, képernyők és a 480 pixeles VU
 - `src/network`: Wi-Fi kezelés
 - `src/stations`: myRadio-kompatibilis állomáslista
@@ -15,6 +15,8 @@ Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 - `data/web`: a böngészős kezelőfelület
 - `data/logos`: az állomáslogók
 - `data/fonts`: az LVGL bináris, ékezetes fontjai
+- `data/backgrounds`: a használt képernyő-háttérképek mappája
+- `data/presets`: a kedvencek képernyő mentett állomásait tartalmazza
 
 ## Könyvtárverziók
 
