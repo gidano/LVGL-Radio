@@ -21,7 +21,7 @@ Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 ## Könyvtárverziók
 
 - Arduino-ESP32 3.3.7
-- Maleksm/Wolle ESP32-audioI2S 3.4.6w (helyi projektkönyvtár)
+- Wolle/Maleksm ESP32-audioI2S 3.4.6w (helyi projektkönyvtár)
 - LVGL 9.3.0
 - LovyanGFX 1.2.24
 
