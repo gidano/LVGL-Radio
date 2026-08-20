@@ -1,3 +1,47 @@
+## ILI9488 + FT6X36 kapacitív érintés
+
+- Külön FT6X36 touch profil.
+- LovyanGFX `Touch_FT5x06` meghajtó.
+- I²C adatkapcsolat.
+- SDA: GPIO8.
+- SCL: GPIO9.
+- INT: GPIO41.
+- RESET: GPIO42.
+- I²C-cím: `0x38`.
+- I²C-órajel: 400 kHz.
+- Érintési tartomány: 320 × 480.
+- XPT2046 SPI-konfiguráció megtartva.
+- `TS_MISO` és `TS_CS` csak XPT2046 módban.
+
+Touch fájlok:
+
+- `options.h`
+- `options_touch_ft6x36.h`
+- `options_touch_xpt2046.h`
+- `src/display/DisplayDevice.h`
+- `src/display/DisplayDevice.cpp`
+
+## Kijelző színeinek invertálása
+
+- Új kapcsoló a WebUI Háttér paneljén.
+- Azonnali alkalmazás mentéskor.
+- Tartós mentés a Preferences tárhelyre.
+- Automatikus visszaállítás újraindításkor.
+- Preferences-kulcs: `color_inv`.
+- WebAPI-mező: `background.invertColors`.
+- A WebUI változása miatt LittleFS-feltöltés szükséges.
+
+Invertálási fájlok:
+
+- `data/web/settings_hu.html`
+- `src/web/RadioWebServer.cpp`
+- `src/app/RadioController.h`
+- `src/app/RadioController.cpp`
+- `src/display/DisplayManager.h`
+- `src/display/DisplayManager.cpp`
+
+---
+
 # LVGL Radio – ESP32-S3, ILI9488, XPT2046, PCM5102A
 
 Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
@@ -7,27 +51,56 @@ Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 
 - `src/app`: az alkalmazás vezérlése
 - `src/audio`: audio-vezérlés és HTTP M3U lejátszás
-- `lib/MaleksmAudioI2S`: a yoRadio maleksm-mod-ból átvett, PSRAM-ra hangolt audio-motor
+- `lib/MaleksmAudioI2S`: a yoRadio-ból átvett, PSRAM-ra hangolt audio-motor
 - `src/display`: kijelző, érintés, képernyők és a 480 pixeles VU
 - `src/network`: Wi-Fi kezelés
 - `src/stations`: myRadio-kompatibilis állomáslista
 - `src/web`: webkiszolgáló és myRadio-kompatibilis API
 - `data/web`: a böngészős kezelőfelület
 - `data/logos`: az állomáslogók
+- `data/cache`: az állomáslogók gyorsítótára
+- `data/moon_phases`: a dátumvezérelt holdfázis PNG képek
 - `data/fonts`: az LVGL bináris, ékezetes fontjai
-- `data/backgrounds`: a használt képernyő-háttérképek mappája
-- `data/presets`: a kedvencek képernyő mentett állomásait tartalmazza
 
 ## Könyvtárverziók
 
 - Arduino-ESP32 3.3.7
-- Wolle/Maleksm ESP32-audioI2S 3.4.6w (helyi projektkönyvtár)
+- Maleksm/Wolle ESP32-audioI2S 3.4.6w (helyi projektkönyvtár)
 - LVGL 9.3.0
 - LovyanGFX 1.2.24
 
 A PlatformIO az LVGL-t és a LovyanGFX-et a `platformio.ini` alapján
 automatikusan kezeli. Az audio-könyvtár a projekt része, ezért nem cserélődik
 le egy későbbi, eltérően viselkedő kiadásra.
+
+## Aktuális kijelzőállapot
+
+- Az állomáslogó panel LVGL szinten klippelt / lekerekített sarkokat használ.
+  Ez csak a kirajzolást érinti, a logófájlokat, a `nologo.png` működését és
+  az `.sr565` cache-kezelést nem módosítja.
+- A holdfázis megjelenítés külön PNG ágon működik. A képek a
+  `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`
+  útvonalakon vannak, 90 × 82 px méretben.
+- A holdkép pozíciója a spektrum látható jobb széle és az óra bal oldala
+  közötti területhez van igazítva.
+- A hold PNG alfa csatornája megmarad, a majdnem fekete szélek finoman
+  áttetszővé válnak, hogy háttérképeken ne jelenjen meg fekete keret.
+- Az időjárás szövegsor a hold beillesztése után 4 px-lel feljebb került.
+- A VU / spektrum szegmensvonalai csak az oszlopokon belül látszanak, az
+  oszlopok közötti hézagokat nem rajzolják át.
+- A VU / spektrum teljes vászonfrissítést használ. Ez fontos, mert a részleges
+  frissítés ezen a kijelzőn fekete sávot okozott a háttérképes megjelenítésnél.
+- A vizualizáció módja webes beállításból is választható: spektrum,
+  sztereó VU vagy üres alsó sáv. Ez nem érintőképernyős használatnál is
+  elérhetővé teszi a váltást.
+- A TFT SPI írási órajel jelenleg 40 MHz. Ez a tesztek alapján csökkentette a
+  CPU1 terhelést, de kijelzőhibák esetén visszaállítható konzervatívabb értékre.
+- A diagnosztikai nézetben a hangpuffer címkéje `BUFFER`, a többi angol
+  mérőértékhez igazítva.
+
+Fontos fejlesztési szabály: a működő állomáslogó-kezelést nem szabad
+átalakítani más funkció kedvéért. A `nologo.png`, a webes PNG logó és az
+`.sr565` cache útvonalai maradjanak stabilak; a holdfázis kép külön ágon él.
 
 ## Hardverkiosztás
 
@@ -72,12 +145,13 @@ curl.exe -F "path=/web/index_de.html" -F "file=@data/web/index_de.html" "http://
 curl.exe -F "path=/web/index_pl.html" -F "file=@data/web/index_pl.html" "http://$radioIp/upload"
 ```
 
-## LittleFS Partition Manager Wi-Fi-kapcsolat
+## LittleFS File Manager Wi-Fi v0.6.0-kapcsolat
 
 A firmware kompatibilis a
 `WiFi_manager_v0.6.0` csomagban lévő Wi‑Fi Partition Managerrel.
 A programban válaszd a **WiFi / IP** kapcsolatot, majd add meg a kijelzőn
-látható rádió-IP-címet. Portot vagy külön útvonalat nem kell megadni.
+látható rádió-IP-címet (később az LVGL Radio feliratot érintve hívható elő).
+Portot vagy külön útvonalat nem kell megadni.
 
 Wi‑Fi-n elérhető műveletek:
 
@@ -128,6 +202,19 @@ A korábbi **myRadio Stations Editor** változtatás nélkül használható:
 A webfelület az eszköz IP-címén érhető el. Állomást választ, hangerőt és
 fényerőt állít, listát szerkeszt, valamint külön lépteti az M3U zeneszámait.
 
+## Encoder kezelés
+
+- Az első encoder forgatása normál rádióképernyőn az előző / következő
+  állomásra vált.
+- Az első encoder hosszú nyomása megnyitja a teljes képernyős
+  állomásválasztót.
+- A teljes képernyős állomásválasztóban az első encoder forgatása a listát
+  görgeti, nem vált azonnal állomást.
+- A kijelölt állomás a meglévő biztonsági késleltetéssel indul: ha a kijelölés
+  3 másodpercig nem változik, a rádió átvált az adott adóra.
+- A hosszú nyomás nem indítja el a rövid nyomáshoz tartozó lejátszás / szünet
+  műveletet.
+
 ## Beállítások és pontos idő
 
 A webfelület **Beállítások** paneljén az időzóna azonnal módosítható és
@@ -152,3 +239,175 @@ fontnak.
 Az érintő kalibrációja NVS-be kerül, ezért csak egyszer fut le. Új
 kalibráláshoz bekapcsolás vagy reset közben tartsd nyomva az első encoder
 gombját (`GPIO5`).
+
+---
+
+# English Summary
+
+## LVGL Radio - ESP32-S3, ILI9488, XPT2046, PCM5102A
+
+This project is a modular LVGL-based internet radio and local network music
+player for the hardware layout defined in `options.h`.
+
+## Structure
+
+- `src/app`: application control
+- `src/audio`: audio control and HTTP M3U playback
+- `lib/MaleksmAudioI2S`: yoRadio-derived audio engine tuned for PSRAM
+- `src/display`: display, touch, screens, and 480-pixel VU visualization
+- `src/network`: Wi-Fi handling
+- `src/stations`: myRadio-compatible station list
+- `src/web`: web server and myRadio-compatible API
+- `data/web`: browser-based control interface
+- `data/logos`: station logos
+- `data/cache`: station logo cache
+- `data/moon_phases`: date-driven moon phase PNG images
+- `data/fonts`: binary LVGL fonts with accented characters
+
+## Library Versions
+
+- Arduino-ESP32 3.3.7
+- Maleksm/Wolle ESP32-audioI2S 3.4.6w, included locally in the project
+- LVGL 9.3.0
+- LovyanGFX 1.2.24
+
+PlatformIO manages LVGL and LovyanGFX through `platformio.ini`. The audio
+library is part of the project, so it will not silently change to a later
+release with different behavior.
+
+## Current Display State
+
+- The station logo panel uses LVGL-side corner clipping / rounding. This only
+  affects rendering and does not modify logo files, `nologo.png`, or `.sr565`
+  cache handling.
+- Moon phase rendering uses its own PNG path. Files are stored as
+  `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`, with a
+  current size of 90 × 82 px.
+- The moon image is positioned between the visible right edge of the spectrum
+  and the left edge of the clock.
+- PNG alpha is preserved for the moon image, and nearly black edge pixels are
+  faded so the black frame does not appear on background images.
+- The weather text row was moved 4 px upward after adding the moon image.
+- VU / spectrum segment separator lines are drawn only inside the columns, not
+  across the gaps between bars.
+- The VU / spectrum uses full canvas invalidation. This is intentional because
+  partial invalidation caused black bands around the visualization when
+  background images were used.
+- The visualization mode can also be selected from the web settings: spectrum,
+  stereo VU, or blank bottom band. This makes the setting available even
+  without a touchscreen.
+- TFT SPI write speed is currently 40 MHz. Testing showed reduced CPU1 load,
+  but it can be reverted if display artifacts appear.
+- The diagnostics view uses `BUFFER` for the audio buffer label, matching the
+  other English labels.
+
+Development rule: do not rework the working station logo handling for other
+features. The `nologo.png`, web PNG logo, and `.sr565` cache paths should stay
+stable; the moon phase image lives on a separate display path.
+
+## Build And Upload
+
+```text
+pio run
+pio run --target upload
+pio run --target uploadfs
+```
+
+`uploadfs` uses the project-specific fix kept in this repository, so it is
+more stable on this board. It is mainly needed when the full local `data`
+folder has to be uploaded to the radio's LittleFS partition.
+
+The four main web UI language pages can also be refreshed separately without
+rewriting the rest of LittleFS:
+
+```powershell
+$radioIp = "RADIO_IP_ADDRESS"
+curl.exe -F "path=/web/index_hu.html" -F "file=@data/web/index_hu.html" "http://$radioIp/upload"
+curl.exe -F "path=/web/index_en.html" -F "file=@data/web/index_en.html" "http://$radioIp/upload"
+curl.exe -F "path=/web/index_de.html" -F "file=@data/web/index_de.html" "http://$radioIp/upload"
+curl.exe -F "path=/web/index_pl.html" -F "file=@data/web/index_pl.html" "http://$radioIp/upload"
+```
+
+## LittleFS File Manager Over Wi-Fi
+
+The firmware is compatible with the Wi-Fi Partition Manager from the
+`WiFi_manager_v0.6.0` package. Select the **WiFi / IP** connection and enter
+the radio IP address shown on the display (It can be accessed later by tapping the ‘LVGL Radio’ label). No custom port or path is required.
+
+Supported Wi-Fi file operations:
+
+- list the complete LittleFS directory tree
+- upload and download files
+- create and delete folders
+- delete files
+- restart the radio
+
+When the file manager connects, the radio enters a maintenance mode: playback
+and LVGL refresh are stopped so active fonts and cache files can be replaced.
+Use the Partition Manager **Restart** command when finished. The file manager
+API is not password-protected on the local network, so use it only on a trusted
+network.
+
+## First Wi-Fi Setup
+
+If `/wifi.txt` does not exist in LittleFS, the radio creates the
+`LVGL-Radio-Setup` access point. Connect to it, open the IP address shown on
+the display, then enter the Wi-Fi network name and password. The password is
+not stored in the project data folder.
+
+## Station List
+
+The `/stations.txt` line format is:
+
+```text
+Station name<TAB>stream or M3U URL<TAB>logo file name
+```
+
+Example:
+
+```text
+PC/ZENE - KEVERT	http://192.168.31.101:8000/playlist_shuffle.m3u	music_server
+```
+
+The previous **myRadio Stations Editor** remains compatible:
+
+- read list: `GET /api/stations`
+- upload full list: multipart `POST /upload`
+- target path: `/stations.txt`
+
+The web UI is available at the device IP address. It can select stations,
+adjust volume and brightness, edit the station list, and step through M3U
+tracks.
+
+## Encoder Controls
+
+- Rotating the first encoder on the normal radio screen switches to the
+  previous / next station.
+- Long-pressing the first encoder opens the full-screen station selector.
+- While the station selector is open, rotating the first encoder scrolls the
+  list instead of switching stations immediately.
+- The selected station starts with the existing safety delay: if the selection
+  does not change for 3 seconds, the radio switches to that station.
+- A long press does not also trigger the short-press play / pause action.
+
+## Settings And Time
+
+The web UI settings panel can change and save the time zone immediately.
+Budapest / Central Europe handles daylight saving time automatically. London,
+Helsinki, UTC, and custom POSIX time zone values are also available. Saved
+settings survive restart.
+
+## M3U Network Music
+
+The player accepts UTF-8 M3U files where absolute HTTP/HTTPS MP3 URLs follow
+the `#EXTM3U` header. `#EXTINF` lines are optional. The displayed track title
+is generated from the URL file and folder name. At the end of a track, the next
+entry starts automatically.
+
+## Fonts And Touch
+
+The accented 20 px and 28 px LVGL fonts are loaded from LittleFS, with a
+firmware fallback font available. Space (`U+0020`) is included in both fonts.
+
+Touch calibration is stored in NVS and normally runs only once. To recalibrate,
+hold the first encoder button (`GPIO5`) during power-on or reset.
