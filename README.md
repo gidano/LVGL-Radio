@@ -1,6 +1,8 @@
 ## Képernyőkép/Screenshots
 
-<img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio.jpg" alt="480x320" width="480"><img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio_2.jpg" alt="480x320" width="480">
+<p align="center">
+  <img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio.jpg" alt="480x320" width="480"><img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio_2.jpg" alt="480x320" width="480">
+</p>
 
 ## ILI9488 / ST7796 kijelző és FT6X36 kapacitív érintés
 
