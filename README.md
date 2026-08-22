@@ -1,10 +1,4 @@
-## Képernyőkép/Screenshots
-
-<p align="center">
-  <img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio.jpg" alt="480x320" width="480"><img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio_2.jpg" alt="480x320" width="480">
-</p>
-
-## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
+## ILI9488 / ST7796 kijelző és FT6X36 kapacitív érintés
 
 - Külön FT6X36 touch profil.
 - ILI9488 és ST7796 kijelzőprofil támogatás.
@@ -137,9 +131,10 @@ Fontos fejlesztési szabály: a működő állomáslogó-kezelést nem szabad
 | TFT RESET | nincs (`-1`) |
 | XPT2046 CS | 42 |
 | Háttérvilágítás | 14 |
-| PCM5102A BCLK | 21 |
-| PCM5102A LRC | 47 |
-| PCM5102A DATA | 38 |
+| CS4344 / PCM5102A BCLK | 21 |
+| CS4344 / PCM5102A LRC | 47 |
+| CS4344 / PCM5102A DATA | 38 |
+| CS4344 MCLK | 17 |
 
 Fontos: a GPIO13 fizikailag be van kötve az XPT2046 miatt, de az ILI9488
 panel olvasása tiltott. Az `options.h` fájlban a `TFT_MISO` ezért marad
@@ -280,9 +275,8 @@ Az érintő kalibrációja NVS-be kerül, ezért csak egyszer fut le. Új
 kalibráláshoz bekapcsolás vagy reset közben tartsd nyomva az első encoder
 gombját (`GPIO5`).
 
-Az ILI9488 kapacitív és ST7796 kijelzők kezeléséban nyújtott segítségért köszönet illeti: ([<b>Simon Zsolt</b>](https://github.com/SimZs))
-
 ---
+
 # English Summary
 
 ## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
@@ -485,5 +479,3 @@ firmware fallback font available. Space (`U+0020`) is included in both fonts.
 
 Touch calibration is stored in NVS and normally runs only once. To recalibrate,
 hold the first encoder button (`GPIO5`) during power-on or reset.
-
-We would like to thank ([<b>Simon Zsolt</b>](https://github.com/SimZs)) for their assistance with the ILI9488 capacitive and ST7796 displays!
