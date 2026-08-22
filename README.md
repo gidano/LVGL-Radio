@@ -1,6 +1,7 @@
-## ILI9488 + FT6X36 kapacitív érintés
+## ILI9488 / ST7796 kijelző és FT6X36 kapacitív érintés
 
 - Külön FT6X36 touch profil.
+- ILI9488 és ST7796 kijelzőprofil támogatás.
 - LovyanGFX `Touch_FT5x06` meghajtó.
 - I²C adatkapcsolat.
 - SDA: GPIO8.
@@ -42,10 +43,20 @@ Invertálási fájlok:
 
 ---
 
-# LVGL Radio – ESP32-S3, ILI9488, XPT2046, PCM5102A
+# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
 
 Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 `options.h` hardverkiosztásához.
+
+## Támogatott kijelző- és érintésprofilok
+
+- Alapértelmezett saját rádió: ILI9488 + XPT2046.
+- Kapacitív ILI9488 tesztprofil: ILI9488 + FT6X36.
+- ST7796 kijelzőprofil: ST7796 + XPT2046 vagy ST7796 + FT6X36.
+- Az ST7796 build az `options.h` fájlban a `DISPLAY_PROFILE_ST7796` kapcsolóval
+  választható.
+- Az FT6X36 kapacitív érintésprofil az `options.h` fájlban a
+  `TOUCH_PROFILE_FT6X36` kapcsolóval választható.
 
 ## Felépítés
 
@@ -81,6 +92,9 @@ le egy későbbi, eltérően viselkedő kiadásra.
 - A holdfázis megjelenítés külön PNG ágon működik. A képek a
   `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`
   útvonalakon vannak, 90 × 82 px méretben.
+- A dátum szerinti képkiválasztás a szinódikus holdhónapot 8 középre igazított
+  szeletre osztja, ezért a telihold kép csak a ciklus közepén jelenik meg, nem
+  pusztán magas megvilágítottsági százaléknál.
 - A holdkép pozíciója a spektrum látható jobb széle és az óra bal oldala
   közötti területhez van igazítva.
 - A hold PNG alfa csatornája megmarad, a majdnem fekete szélek finoman
@@ -93,6 +107,9 @@ le egy későbbi, eltérően viselkedő kiadásra.
 - A vizualizáció módja webes beállításból is választható: spektrum,
   sztereó VU vagy üres alsó sáv. Ez nem érintőképernyős használatnál is
   elérhetővé teszi a váltást.
+- Ugyanebben a webes panelben az érintéses fejléc- és logóváltások is
+  állíthatók: LVGL Radio / IP, Wi-Fi ikon / szöveg, grafikus / szöveges
+  hangerő, illetve logó / diagnosztika.
 - A TFT SPI írási órajel jelenleg 40 MHz. Ez a tesztek alapján csökkentette a
   CPU1 terhelést, de kijelzőhibák esetén visszaállítható konzervatívabb értékre.
 - A diagnosztikai nézetben a hangpuffer címkéje `BUFFER`, a többi angol
@@ -137,6 +154,11 @@ helyi `data` mappát akarod egyben feltenni a rádió LittleFS partíciójára.
 A kezelőfelület négy nyelvi főoldala külön, a többi LittleFS-adat
 érintése nélkül is frissíthető. A firmware feltöltése után PowerShellben:
 
+Fontos: a böngészős webfelület négy nyelven elkészült, de maga a rádió
+kijelzőfelülete jelenleg nem teljesen többnyelvű. A rádió oldali szövegek,
+névnapfájlok és kijelzőn megjelenő üzenetek többnyelvűsítése külön fejlesztési
+feladat.
+
 ```powershell
 $radioIp = "A_RADIO_IP_CIME"
 curl.exe -F "path=/web/index_hu.html" -F "file=@data/web/index_hu.html" "http://$radioIp/upload"
@@ -152,6 +174,9 @@ A firmware kompatibilis a
 A programban válaszd a **WiFi / IP** kapcsolatot, majd add meg a kijelzőn
 látható rádió-IP-címet (később az LVGL Radio feliratot érintve hívható elő).
 Portot vagy külön útvonalat nem kell megadni.
+
+Ajánlott kiegészítő partíciófájlok Wi-Fi-s kezeléséhez:
+[LittleFS-SPIFFS_File_Manager_WiFi_v0.6.0](https://github.com/gidano/myRadio-SPIFFS-Manager/tree/main/LittleFS-SPIFFS%20Partition%20Manager).
 
 Wi‑Fi-n elérhető műveletek:
 
@@ -199,15 +224,24 @@ A korábbi **myRadio Stations Editor** változtatás nélkül használható:
 - teljes lista feltöltése: multipart `POST /upload`
 - célútvonal: `/stations.txt`
 
+Ajánlott kiegészítő állomáslista Wi-Fi-s kezeléséhez:
+[myRadio Stations Editor](https://github.com/gidano/myRadio-Stations-Editor).
+
 A webfelület az eszköz IP-címén érhető el. Állomást választ, hangerőt és
 fényerőt állít, listát szerkeszt, valamint külön lépteti az M3U zeneszámait.
 
+PC-n lévő zenei mappák hálózati streameléséhez használható kiegészítő:
+[myRadio Music Server](https://github.com/gidano/myRadio-Music-Server).
+
 ## Encoder kezelés
 
-- Az első encoder forgatása normál rádióképernyőn az előző / következő
-  állomásra vált.
+- Két encoderes bekötésnél az első encoder forgatása normál rádióképernyőn az
+  előző / következő állomásra vált, a második encoder a hangerőt állítja.
+- Egy encoderes bekötésnél, amikor az `ENC2_*` lábak nincsenek definiálva, az
+  első encoder forgatása normál rádióképernyőn a hangerőt állítja.
 - Az első encoder hosszú nyomása megnyitja a teljes képernyős
   állomásválasztót.
+- Az első encoder rövid nyomása lejátszás / szünet kapcsolóként működik.
 - A teljes képernyős állomásválasztóban az első encoder forgatása a listát
   görgeti, nem vált azonnal állomást.
 - A kijelölt állomás a meglévő biztonsági késleltetéssel indul: ha a kijelölés
@@ -244,10 +278,20 @@ gombját (`GPIO5`).
 
 # English Summary
 
-## LVGL Radio - ESP32-S3, ILI9488, XPT2046, PCM5102A
+## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
 
 This project is a modular LVGL-based internet radio and local network music
 player for the hardware layout defined in `options.h`.
+
+## Supported Display And Touch Profiles
+
+- Default own-radio build: ILI9488 + XPT2046.
+- Capacitive ILI9488 test profile: ILI9488 + FT6X36.
+- ST7796 display profile: ST7796 + XPT2046 or ST7796 + FT6X36.
+- The ST7796 build is selected in `options.h` with the
+  `DISPLAY_PROFILE_ST7796` switch.
+- The FT6X36 capacitive touch profile is selected in `options.h` with the
+  `TOUCH_PROFILE_FT6X36` switch.
 
 ## Structure
 
@@ -283,6 +327,9 @@ release with different behavior.
 - Moon phase rendering uses its own PNG path. Files are stored as
   `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`, with a
   current size of 90 × 82 px.
+- Date-based image selection divides the synodic lunar month into 8 centered
+  slices, so the full moon image appears around the middle of the cycle, not
+  merely when illumination is high.
 - The moon image is positioned between the visible right edge of the spectrum
   and the left edge of the clock.
 - PNG alpha is preserved for the moon image, and nearly black edge pixels are
@@ -296,6 +343,9 @@ release with different behavior.
 - The visualization mode can also be selected from the web settings: spectrum,
   stereo VU, or blank bottom band. This makes the setting available even
   without a touchscreen.
+- The same web panel also exposes touch-only header and logo toggles: LVGL
+  Radio / IP, Wi-Fi icon / text, graphical / textual volume, and logo /
+  diagnostics.
 - TFT SPI write speed is currently 40 MHz. Testing showed reduced CPU1 load,
   but it can be reverted if display artifacts appear.
 - The diagnostics view uses `BUFFER` for the audio buffer label, matching the
@@ -320,6 +370,10 @@ folder has to be uploaded to the radio's LittleFS partition.
 The four main web UI language pages can also be refreshed separately without
 rewriting the rest of LittleFS:
 
+Important: the browser-based web UI is available in four languages, but the
+radio display UI itself is not fully multilingual yet. Multilingual radio-side
+labels, nameday files, and on-screen messages are a separate future task.
+
 ```powershell
 $radioIp = "RADIO_IP_ADDRESS"
 curl.exe -F "path=/web/index_hu.html" -F "file=@data/web/index_hu.html" "http://$radioIp/upload"
@@ -333,6 +387,9 @@ curl.exe -F "path=/web/index_pl.html" -F "file=@data/web/index_pl.html" "http://
 The firmware is compatible with the Wi-Fi Partition Manager from the
 `WiFi_manager_v0.6.0` package. Select the **WiFi / IP** connection and enter
 the radio IP address shown on the display (It can be accessed later by tapping the ‘LVGL Radio’ label). No custom port or path is required.
+
+Recommended companion tool for managing partition files over Wi-Fi:
+[LittleFS-SPIFFS_File_Manager_WiFi_v0.6.0](https://github.com/gidano/myRadio-SPIFFS-Manager/tree/main/LittleFS-SPIFFS%20Partition%20Manager).
 
 Supported Wi-Fi file operations:
 
@@ -375,15 +432,25 @@ The previous **myRadio Stations Editor** remains compatible:
 - upload full list: multipart `POST /upload`
 - target path: `/stations.txt`
 
+Recommended companion tool for managing station lists over Wi-Fi:
+[myRadio Stations Editor](https://github.com/gidano/myRadio-Stations-Editor).
+
 The web UI is available at the device IP address. It can select stations,
 adjust volume and brightness, edit the station list, and step through M3U
 tracks.
 
+Companion tool for streaming music folders from a PC on the local network:
+[myRadio Music Server](https://github.com/gidano/myRadio-Music-Server).
+
 ## Encoder Controls
 
-- Rotating the first encoder on the normal radio screen switches to the
-  previous / next station.
+- With a two-encoder wiring, rotating the first encoder on the normal radio
+  screen switches to the previous / next station, while the second encoder
+  adjusts volume.
+- With a one-encoder wiring, when the `ENC2_*` pins are not defined, rotating
+  the first encoder on the normal radio screen adjusts volume.
 - Long-pressing the first encoder opens the full-screen station selector.
+- Short-pressing the first encoder toggles play / pause.
 - While the station selector is open, rotating the first encoder scrolls the
   list instead of switching stations immediately.
 - The selected station starts with the existing safety delay: if the selection

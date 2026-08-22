@@ -1,6 +1,6 @@
 # LVGL Radio – funkcióösszefoglaló / functionality summary
 
-Last updated / Utoljára frissítve: 2026-08-19
+Last updated / Utoljára frissítve: 2026-08-22
 
 ---
 
@@ -8,7 +8,15 @@ Last updated / Utoljára frissítve: 2026-08-19
 
 ### Általános leírás
 
-Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelzőkezelést, LittleFS fájlrendszert, webes kezelőfelületet, állomáslogó-kezelést, időjárás-megjelenítést és valós idejű audió-vizualizációt használ.
+Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelzőkezelést, LittleFS fájlrendszert, webes kezelőfelületet, állomáslogó-kezelést, időjárás-megjelenítést és valós idejű audió-vizualizációt használ. A kijelzőoldal ILI9488 és ST7796 profilokat is támogat.
+
+### Támogatott kijelző- és érintésprofilok
+
+- alapértelmezett saját rádió: ILI9488 + XPT2046
+- kapacitív ILI9488 tesztprofil: ILI9488 + FT6X36
+- ST7796 kijelzőprofil: ST7796 + XPT2046 vagy ST7796 + FT6X36
+- az ST7796 build az `options.h` fájlban a `DISPLAY_PROFILE_ST7796` kapcsolóval választható
+- az FT6X36 kapacitív érintésprofil az `options.h` fájlban a `TOUCH_PROFILE_FT6X36` kapcsolóval választható
 
 ### Fő funkciók
 
@@ -17,11 +25,13 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - webes kezelőfelület állomás- és beállításkezeléshez
 - állomáslogók megjelenítése
 - diagnosztikai nézet CPU / RAM / PSRAM / hőmérséklet / puffer adatokkal
-- időjárási adatok megjelenítése Open-Meteo alapokon
+- időjárási adatok megjelenítése Open-Meteo alapokon (nincs szükség egyéni API-kulcsra!)
 - dátum és névnap megjelenítése
 - dátumvezérelt holdfázis PNG megjelenítés
 - spektrum / VU audió-vizualizáció
-- webes spektrum / VU / üres vizualizációs módválasztás
+- webes spektrum / VU / üres vizualizációs módválasztás, valamint a fejléc /
+  logó érintéses váltásainak webes állítása
+- 4 nyelvű webes kezelőfelület
 - teljes képernyős állomásválasztó encoderes görgetéssel
 - hangerőkezelés fejlécből és felugró panelből
 - IP-cím megjelenítés az óra helyén
@@ -112,18 +122,22 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - A szegmensek közötti vízszintes elválasztók csak az oszlopokon belül rajzolódnak, az oszlopok közti hézagokban nem.
 - A VU / spektrum teljes vászonfrissítést használ, mert ez őrzi meg stabilan a háttérképek áttetsző hatását. Korábbi részleges frissítés fekete sávot okozott a vizualizáció körül, ezért nem használható alapként.
 - A vizualizáció módja a webes beállításokból is választható: spektrum, sztereó VU vagy üres alsó sáv. Ez a nem érintőképernyős használatot is támogatja.
+- A webes beállításokból a fejléc és logó érintéssel váltott nézetei is állíthatók: LVGL Radio / IP, Wi-Fi ikon / szöveg, grafikus / szöveges hangerő és logó / diagnosztika.
 
 #### 12. Holdfázis-kép
 
 - A holdfázis külön PNG megjelenítési ágon működik, nem az állomáslogó-cache közösítésével.
 - A képek helye: `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`.
 - A használt képméret: 90×82 px.
+- A dátum szerinti választás a szinódikus holdhónapot 8 középre igazított szeletre osztja, így a növő / telő / fogyó állapotok sorrendje nem pusztán megvilágítottsági százalék alapján dől el.
 - A kép a spektrum látható jobb széle és az óra bal oldala közötti területhez igazított pozícióban jelenik meg.
 - A PNG alfa csatornája megmarad; a majdnem fekete szélek külön finomított áttetszőséget kapnak, hogy háttérképeken ne látszódjon fekete keret.
 
 #### 13. Encoderes állomásválasztó
 
-- Az első encoder forgatása normál nézetben az előző / következő állomásra vált.
+- Két encoderes bekötésnél az első encoder forgatása normál nézetben az előző / következő állomásra vált, a második encoder a hangerőt állítja.
+- Egy encoderes bekötésnél, amikor az `ENC2_*` lábak nincsenek definiálva, az első encoder forgatása normál nézetben a hangerőt állítja.
+- Az első encoder rövid nyomása lejátszás / szünet kapcsolóként működik.
 - Az első encoder hosszú nyomása megnyitja a teljes képernyős állomásválasztót.
 - Nyitott állomásválasztóban az első encoder forgatása a listát görgeti.
 - A kijelölt állomás 3 másodperc változatlan kijelölés után indul el.
@@ -139,6 +153,7 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - beállítások oldal
 - időjárás beállítása
 - spektrum / VU / üres alsó kijelzősáv beállítása
+- LVGL Radio / IP, Wi-Fi, hangerő és logó / diagnosztika nézet állítása
 - időzóna / időbeállítás
 - fájlkezelés LittleFS-en
 
@@ -158,6 +173,12 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - holdfázis képek: `/moon_phases`
 - időjárás ikonok: `/weather_icons_48`
 - webes állományok: `/web`
+
+### Kapcsolódó kiegészítő eszközök
+
+- Partíció fájlok kezeléséhez Wi-Fi kapcsolaton: [LittleFS-SPIFFS_File_Manager_WiFi_v0.6.0](https://github.com/gidano/myRadio-SPIFFS-Manager/tree/main/LittleFS-SPIFFS%20Partition%20Manager)
+- Állomáslista kezeléséhez Wi-Fi kapcsolaton: [myRadio Stations Editor](https://github.com/gidano/myRadio-Stations-Editor)
+- PC-n lévő zenei mappák hálózati streameléséhez: [myRadio Music Server](https://github.com/gidano/myRadio-Music-Server)
 
 ### Jelenlegi megjelenítési sajátosságok
 
@@ -182,6 +203,8 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - A működő állomáslogó-kezelést, beleértve a `nologo.png` és `.sr565` útvonalakat, más funkció kedvéért nem szabad átalakítani. A holdfázis megjelenítés külön PNG ágban marad.
 - A VU / spektrum-nál teljes vászonfrissítés a stabil állapot.
 - A vizualizáció módja Preferences-ben tárolódik (`vu_mode`), és webes settingsből is állítható.
+- A nem érintős használatot segítő kijelzőállapotok Preferences-ben tárolódnak: `ui_ip`, `ui_wifi`, `ui_vol`, `ui_diag`.
+- A webfelület 4 nyelven elkészült, de a rádió kijelzőfelülete jelenleg nem teljesen többnyelvű; a kijelzőn megjelenő szövegek, üzenetek és névnapfájlok többnyelvűsítése külön fejlesztési feladat.
 - A kezelőfelület több pontján érintéses váltások működnek, ezért a képernyőelemek pozicionálása és az érintési zónák mérete kiemelten fontos.
 
 ### Ismert korlátok / planned features
@@ -195,7 +218,7 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 
 #### Tervezett / lehetséges jövőbeli fejlesztések
 
-- 4 nyelvű teljes felület
+- rádió oldali, webből váltható többnyelvű kijelzőfelület
 - bővebb webes settings oldal
 - theme / színkezelés webes beállításból
 - időjárási piktogram és időjárási sor további finomhangolása
@@ -217,8 +240,10 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - Koppintás az óra területen: óra / IP-cím váltás
 - Koppintás az időjárás ikonon: időjárás / mai / holnapi előrejelzés váltás
 - Koppintás a VU / spektrum területen: vizualizációs mód váltás
-- Első encoder forgatása: előző / következő állomás
+- Két encoderrel első encoder forgatása: előző / következő állomás
+- Egy encoderrel első encoder forgatása: hangerő állítása
 - Első encoder hosszú nyomása: teljes képernyős állomásválasztó megnyitása
+- Első encoder rövid nyomása: lejátszás / szünet
 - Állomásválasztóban az első encoder forgatása: lista görgetése
 
 #### Webes kezelés
@@ -247,7 +272,15 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 
 ### General description
 
-LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display handling, LittleFS for storage, a web UI for management, station logo handling, weather display, and real-time audio visualization.
+LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display handling, LittleFS for storage, a web UI for management, station logo handling, weather display, and real-time audio visualization. The display layer supports both ILI9488 and ST7796 profiles.
+
+### Supported display and touch profiles
+
+- default own-radio build: ILI9488 + XPT2046
+- capacitive ILI9488 test profile: ILI9488 + FT6X36
+- ST7796 display profile: ST7796 + XPT2046 or ST7796 + FT6X36
+- the ST7796 build is selected in `options.h` with the `DISPLAY_PROFILE_ST7796` switch
+- the FT6X36 capacitive touch profile is selected in `options.h` with the `TOUCH_PROFILE_FT6X36` switch
 
 ### Main features
 
@@ -256,11 +289,13 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - web interface for station and settings management
 - station logo display
 - diagnostic view with CPU / RAM / PSRAM / temperature / buffer data
-- weather information display based on Open-Meteo
+- weather information display based on Open-Meteo (No individual API key is required!)
 - date and nameday display
 - date-driven moon phase PNG display
 - spectrum / VU audio visualization
-- web-selectable spectrum / VU / blank visualization mode
+- web-selectable spectrum / VU / blank visualization mode, plus web control
+  for header / logo views that are normally changed by touch
+- 4-language browser-based web interface
 - full-screen station selector with encoder scrolling
 - volume control from the header and popup panel
 - IP address display in the clock area
@@ -351,18 +386,22 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - Horizontal segment separators are drawn only inside the bars, not across the gaps between columns.
 - The VU / spectrum uses full canvas invalidation because this reliably preserves the transparent background-image look. Earlier partial invalidation produced a black band around the visualization and is not a good baseline.
 - The visualization mode can also be selected from web settings: spectrum, stereo VU, or blank bottom band. This supports builds without a touchscreen.
+- Header and logo views normally toggled by touch can also be changed from web settings: LVGL Radio / IP, Wi-Fi icon / text, graphical / textual volume, and logo / diagnostics.
 
 #### 12. Moon phase image
 
 - Moon phase rendering uses a separate PNG path and is not merged into the station logo cache flow.
 - Files are stored as `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`.
 - Current image size: 90×82 px.
+- Date-based selection divides the synodic lunar month into 8 centered slices, so waxing / full / waning states are not chosen from illumination percentage alone.
 - The image is positioned within the area between the visible right edge of the spectrum and the left edge of the clock.
 - PNG alpha is preserved; nearly black border pixels receive a tuned fade so the black frame does not show on background images.
 
 #### 13. Encoder Station Selector
 
-- Rotating the first encoder in normal view switches to the previous / next station.
+- With two encoders, rotating the first encoder in normal view switches to the previous / next station, while the second encoder adjusts volume.
+- With one encoder, when the `ENC2_*` pins are not defined, rotating the first encoder in normal view adjusts volume.
+- Short-pressing the first encoder toggles play / pause.
 - Long-pressing the first encoder opens the full-screen station selector.
 - While the selector is open, rotating the first encoder scrolls the station list.
 - The selected station starts after the selection remains unchanged for 3 seconds.
@@ -397,6 +436,12 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - weather icons: `/weather_icons_48`
 - web assets: `/web`
 
+### Related companion tools
+
+- Managing partition files over Wi-Fi: [LittleFS-SPIFFS_File_Manager_WiFi_v0.6.0](https://github.com/gidano/myRadio-SPIFFS-Manager/tree/main/LittleFS-SPIFFS%20Partition%20Manager)
+- Managing station lists over Wi-Fi: [myRadio Stations Editor](https://github.com/gidano/myRadio-Stations-Editor)
+- Streaming music folders from a PC on the local network: [myRadio Music Server](https://github.com/gidano/myRadio-Music-Server)
+
 ### Current display-specific notes
 
 - optimized formats can be used for stable rendering of station logos and weather icons
@@ -420,6 +465,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - The working station logo handling, including `nologo.png` and `.sr565` paths, should not be reworked for other features. Moon phase rendering stays on its own PNG path.
 - Partial invalidation of the VU / spectrum broke background transparency on this display, so full canvas invalidation is the stable state.
 - The diagnostics view uses `BUFFER` for the audio buffer label, matching the other English labels.
+- The web UI is available in 4 languages, but the radio display UI itself is not fully multilingual yet; radio-side labels, messages, and nameday files are a separate development task.
 - Because several screen areas use touch-based toggles, object placement and touch-zone sizing are important parts of the UI design.
 
 ### Known issues / planned features
@@ -433,7 +479,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 
 #### Planned / possible future improvements
 
-- full 4-language interface
+- web-selectable multilingual radio display UI
 - expanded web settings page
 - theme / color handling from the web UI
 - further fine-tuning of weather pictograms and weather row
@@ -455,8 +501,10 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - Tap the clock area: switch clock / IP address
 - Tap the weather icon: switch current / today / tomorrow weather mode
 - Tap the VU / spectrum area: switch visualization mode
-- Rotate the first encoder: previous / next station
+- With two encoders, rotate the first encoder: previous / next station
+- With one encoder, rotate the first encoder: adjust volume
 - Long-press the first encoder: open the full-screen station selector
+- Short-press the first encoder: play / pause
 - Rotate the first encoder in the station selector: scroll the list
 
 #### Web control
@@ -467,6 +515,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
   - search / editing
   - weather setup
   - spectrum / VU / blank bottom-band setup
+  - LVGL Radio / IP, Wi-Fi, volume, and logo / diagnostics view setup
   - time setup
   - file management
 
