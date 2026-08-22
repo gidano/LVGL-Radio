@@ -1,0 +1,1538 @@
+#include "LogoManager.h"
+
+#include <HTTPClient.h>
+#include <LittleFS.h>
+#include <LovyanGFX.hpp>
+#include <NetworkClient.h>
+#include <NetworkClientSecure.h>
+#include <esp_heap_caps.h>
+#include <math.h>
+#include <new>
+
+#define STBI_NO_STDIO
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
+#define STBI_ONLY_WEBP
+#define STB_IMAGE_IMPLEMENTATION
+#include "third_party/stb_image.h"
+
+namespace {
+
+constexpr size_t kMaximumArtworkBytes = 384 * 1024;
+constexpr size_t kMaximumEmbeddedSegments = 8;
+constexpr size_t kMaximumCacheBytes = 2 * 1024 * 1024;
+constexpr size_t kTargetCacheBytes = 1536 * 1024;
+constexpr size_t kMinimumArtworkFreeBytes = 96 * 1024;
+constexpr uint16_t kThumbnailSize = 128;
+constexpr uint16_t kMaximumDecodeDimension = 512;
+constexpr size_t kThumbnailBytes =
+    8 + static_cast<size_t>(kThumbnailSize) * kThumbnailSize * 2;
+constexpr uint32_t kArtworkDelayMs = 5000;
+constexpr uint32_t kNoLogoSearchWindowMs = 20000;
+constexpr size_t kMinimumLogoNetworkBuffer = 192 * 1024;
+constexpr size_t kMinimumConfiguredLogoBuffer = 128 * 1024;
+constexpr uint32_t kReadIdleTimeoutMs = 3500;
+constexpr char kRadioBrowserBases[][35] = {
+    "https://de1.api.radio-browser.info",
+    "https://nl1.api.radio-browser.info",
+};
+
+struct ImageSize {
+  uint16_t width{0};
+  uint16_t height{0};
+};
+
+uint32_t fnv1a(const String& value) {
+  uint32_t hash = 2166136261UL;
+  for (size_t index = 0; index < value.length(); ++index) {
+    hash ^= static_cast<uint8_t>(value[index]);
+    hash *= 16777619UL;
+  }
+  return hash;
+}
+
+uint16_t readLe16(const uint8_t* data) {
+  return static_cast<uint16_t>(data[0]) |
+         (static_cast<uint16_t>(data[1]) << 8);
+}
+
+uint32_t readLe32(const uint8_t* data) {
+  return static_cast<uint32_t>(data[0]) |
+         (static_cast<uint32_t>(data[1]) << 8) |
+         (static_cast<uint32_t>(data[2]) << 16) |
+         (static_cast<uint32_t>(data[3]) << 24);
+}
+
+bool readBe32(File& file, uint32_t& value) {
+  uint8_t bytes[4]{};
+  if (file.read(bytes, sizeof(bytes)) != sizeof(bytes)) return false;
+  value = (static_cast<uint32_t>(bytes[0]) << 24) |
+          (static_cast<uint32_t>(bytes[1]) << 16) |
+          (static_cast<uint32_t>(bytes[2]) << 8) | bytes[3];
+  return true;
+}
+
+uint16_t readBe16(File& file) {
+  uint8_t bytes[2]{};
+  if (file.read(bytes, sizeof(bytes)) != sizeof(bytes)) return 0;
+  return (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1];
+}
+
+bool readPngSize(const String& path, ImageSize& size) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file) return false;
+  uint8_t header[24]{};
+  const bool valid =
+      file.read(header, sizeof(header)) == sizeof(header) &&
+      header[0] == 0x89 && header[1] == 'P' && header[2] == 'N' &&
+      header[3] == 'G';
+  file.close();
+  if (!valid) return false;
+  const uint32_t width = (static_cast<uint32_t>(header[16]) << 24) |
+                         (static_cast<uint32_t>(header[17]) << 16) |
+                         (static_cast<uint32_t>(header[18]) << 8) | header[19];
+  const uint32_t height = (static_cast<uint32_t>(header[20]) << 24) |
+                          (static_cast<uint32_t>(header[21]) << 16) |
+                          (static_cast<uint32_t>(header[22]) << 8) | header[23];
+  if (!width || !height || width > UINT16_MAX || height > UINT16_MAX)
+    return false;
+  size.width = width;
+  size.height = height;
+  return true;
+}
+
+bool readJpegSize(const String& path, ImageSize& size) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file || readBe16(file) != 0xFFD8) {
+    if (file) file.close();
+    return false;
+  }
+  while (file.available()) {
+    if (file.read() != 0xFF) continue;
+    uint8_t marker = file.read();
+    while (marker == 0xFF && file.available()) marker = file.read();
+    if (marker == 0xD9 || marker == 0xDA) break;
+    const uint16_t segmentLength = readBe16(file);
+    if (segmentLength < 2) break;
+    const bool startOfFrame =
+        (marker >= 0xC0 && marker <= 0xC3) ||
+        (marker >= 0xC5 && marker <= 0xC7) ||
+        (marker >= 0xC9 && marker <= 0xCB) ||
+        (marker >= 0xCD && marker <= 0xCF);
+    if (startOfFrame) {
+      file.read();
+      size.height = readBe16(file);
+      size.width = readBe16(file);
+      file.close();
+      return size.width && size.height;
+    }
+    file.seek(file.position() + segmentLength - 2);
+  }
+  file.close();
+  return false;
+}
+
+bool readBmpSize(const String& path, ImageSize& size) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file) return false;
+  uint8_t header[26]{};
+  const bool valid =
+      file.read(header, sizeof(header)) == sizeof(header) &&
+      header[0] == 'B' && header[1] == 'M';
+  file.close();
+  if (!valid) return false;
+  int32_t width = static_cast<int32_t>(readLe32(header + 18));
+  int32_t height = static_cast<int32_t>(readLe32(header + 22));
+  if (height < 0) height = -height;
+  if (width <= 0 || height <= 0 || width > UINT16_MAX ||
+      height > UINT16_MAX)
+    return false;
+  size.width = width;
+  size.height = height;
+  return true;
+}
+
+bool readImageSize(const String& path, ImageSize& size) {
+  String lower = path;
+  lower.toLowerCase();
+  if (lower.endsWith(".png")) return readPngSize(path, size);
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+    return readJpegSize(path, size);
+  if (lower.endsWith(".bmp")) return readBmpSize(path, size);
+  if (lower.endsWith(".webp")) {
+    File file = LittleFS.open(path, FILE_READ);
+    if (!file) return false;
+    const size_t length = file.size();
+    if (!length || length > kMaximumArtworkBytes) {
+      file.close();
+      return false;
+    }
+    std::vector<uint8_t> bytes(length);
+    const size_t received = file.read(bytes.data(), length);
+    file.close();
+    if (received != length) return false;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                               &width, &height, &channels))
+      return false;
+    if (width <= 0 || height <= 0 || width > UINT16_MAX ||
+        height > UINT16_MAX)
+      return false;
+    size.width = static_cast<uint16_t>(width);
+    size.height = static_cast<uint16_t>(height);
+    return true;
+  }
+  return false;
+}
+
+bool hasVisiblePixels(const uint8_t* pixels, size_t pixelCount) {
+  if (!pixels || !pixelCount) return false;
+  size_t visible = 0;
+  for (size_t index = 0; index < pixelCount; ++index) {
+    const size_t offset = index * 2;
+    if (pixels[offset] != 0 || pixels[offset + 1] != 0) {
+      ++visible;
+      if (visible >= 64) return true;
+    }
+  }
+  return false;
+}
+
+bool loadFileBytes(const String& path, std::vector<uint8_t>& bytes) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file) return false;
+  const size_t length = file.size();
+  if (!length || length > kMaximumArtworkBytes) {
+    file.close();
+    return false;
+  }
+  bytes.resize(length);
+  const size_t received = file.read(bytes.data(), length);
+  file.close();
+  return received == length;
+}
+
+bool decodeStbSprite(const String& imagePath, lgfx::LGFX_Sprite& decoded,
+                     int32_t decodedWidth, int32_t decodedHeight) {
+  std::vector<uint8_t> bytes;
+  if (!loadFileBytes(imagePath, bytes)) return false;
+
+  int width = 0;
+  int height = 0;
+  int channels = 0;
+  stbi_uc* rgba = stbi_load_from_memory(bytes.data(),
+                                        static_cast<int>(bytes.size()), &width,
+                                        &height, &channels, 4);
+  if (!rgba || width <= 0 || height <= 0) {
+    if (rgba) stbi_image_free(rgba);
+    return false;
+  }
+
+  uint16_t* pixels = static_cast<uint16_t*>(decoded.getBuffer());
+  if (!pixels) {
+    stbi_image_free(rgba);
+    return false;
+  }
+
+  for (int32_t y = 0; y < decodedHeight; ++y) {
+    const int srcY = static_cast<int>((static_cast<int64_t>(y) * height) /
+                                      decodedHeight);
+    for (int32_t x = 0; x < decodedWidth; ++x) {
+      const int srcX = static_cast<int>((static_cast<int64_t>(x) * width) /
+                                        decodedWidth);
+      const uint8_t* src =
+          rgba + ((static_cast<size_t>(srcY) * width) + srcX) * 4;
+      const uint32_t alpha = src[3];
+      uint16_t color = 0x0000;
+      if (alpha) {
+        uint32_t r = src[0];
+        uint32_t g = src[1];
+        uint32_t b = src[2];
+        if (alpha < 255) {
+          r = (r * alpha) / 255;
+          g = (g * alpha) / 255;
+          b = (b * alpha) / 255;
+        }
+        color = lgfx::swap565(static_cast<uint8_t>(r),
+                              static_cast<uint8_t>(g),
+                              static_cast<uint8_t>(b));
+      }
+      pixels[static_cast<size_t>(y) * decodedWidth + x] = color;
+    }
+  }
+
+  stbi_image_free(rgba);
+  return true;
+}
+
+String urlEncode(String value) {
+  String encoded;
+  encoded.reserve(value.length() * 3);
+  static const char hex[] = "0123456789ABCDEF";
+  for (size_t index = 0; index < value.length(); ++index) {
+    const uint8_t ch = static_cast<uint8_t>(value[index]);
+    const bool unreserved =
+        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+        (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' ||
+        ch == '~';
+    if (unreserved) {
+      encoded += static_cast<char>(ch);
+    } else if (ch == ' ') {
+      encoded += '+';
+    } else {
+      encoded += '%';
+      encoded += hex[ch >> 4];
+      encoded += hex[ch & 0x0F];
+    }
+  }
+  return encoded;
+}
+
+bool fetchText(const String& fetchUrl, String& body) {
+  HTTPClient http;
+  NetworkClient plainClient;
+  NetworkClientSecure secureClient;
+  NetworkClient* client = &plainClient;
+  if (fetchUrl.startsWith("https://")) {
+    secureClient.setInsecure();
+    client = &secureClient;
+  }
+  http.setConnectTimeout(1500);
+  http.setTimeout(2500);
+  http.setUserAgent("LVGL-Radio/1.0 ESP32");
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(*client, fetchUrl)) return false;
+  const int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    http.end();
+    return false;
+  }
+  body = http.getString();
+  http.end();
+  return !body.isEmpty();
+}
+
+String jsonUnescape(String value) {
+  value.replace("\\\\", "\\");
+  value.replace("\\/", "/");
+  value.replace("\\\"", "\"");
+  value.replace("\\n", "\n");
+  value.replace("\\r", "\r");
+  value.replace("\\t", "\t");
+  return value;
+}
+
+String extractJsonStringField(const String& json, const char* fieldName) {
+  const String needle = String("\"") + fieldName + "\"";
+  size_t searchFrom = 0;
+  while (true) {
+    const int index = json.indexOf(needle, searchFrom);
+    if (index < 0) return "";
+    size_t cursor = static_cast<size_t>(index) + needle.length();
+    while (cursor < json.length() &&
+           isspace(static_cast<unsigned char>(json[cursor]))) {
+      ++cursor;
+    }
+    if (cursor >= json.length() || json[cursor] != ':') {
+      searchFrom = static_cast<size_t>(index) + needle.length();
+      continue;
+    }
+    ++cursor;
+    while (cursor < json.length() &&
+           isspace(static_cast<unsigned char>(json[cursor]))) {
+      ++cursor;
+    }
+    if (cursor >= json.length()) return "";
+    if (json[cursor] == 'n') {
+      return "";
+    }
+    if (json[cursor] != '"') {
+      searchFrom = cursor + 1;
+      continue;
+    }
+    ++cursor;
+    String value;
+    bool escaped = false;
+    while (cursor < json.length()) {
+      const char character = json[cursor++];
+      if (escaped) {
+        value += character;
+        escaped = false;
+        continue;
+      }
+      if (character == '\\') {
+        escaped = true;
+        continue;
+      }
+      if (character == '"') return jsonUnescape(value);
+      value += character;
+    }
+    return "";
+  }
+}
+
+String radioBrowserFaviconForStream(const String& streamUrl) {
+  const std::vector<String> endpoints = {
+      streamUrl,
+  };
+
+  for (const String& base : endpoints) {
+    if (base.isEmpty()) continue;
+    for (const char* host : kRadioBrowserBases) {
+      const String url = String(host) + "/json/stations/byurl?url=" +
+                         urlEncode(base);
+      String json;
+      if (!fetchText(url, json)) continue;
+      const String favicon = extractJsonStringField(json, "favicon");
+      if (!favicon.isEmpty()) return favicon;
+    }
+  }
+
+  return "";
+}
+
+bool copyFileRange(const String& sourcePath, size_t offset, size_t length,
+                   const String& destinationPath) {
+  File source = LittleFS.open(sourcePath, FILE_READ);
+  if (!source || offset > source.size() || length > source.size() - offset) {
+    if (source) source.close();
+    return false;
+  }
+  if (LittleFS.exists(destinationPath)) LittleFS.remove(destinationPath);
+  File output = LittleFS.open(destinationPath, FILE_WRITE);
+  if (!output || !source.seek(offset)) {
+    if (output) output.close();
+    source.close();
+    return false;
+  }
+  uint8_t buffer[1024];
+  size_t remaining = length;
+  while (remaining) {
+    const size_t requested = min(remaining, sizeof(buffer));
+    const int received = source.read(buffer, requested);
+    if (received <= 0 ||
+        output.write(buffer, received) != static_cast<size_t>(received))
+      break;
+    remaining -= received;
+    vTaskDelay(1);
+  }
+  output.flush();
+  output.close();
+  source.close();
+  if (remaining) LittleFS.remove(destinationPath);
+  return remaining == 0;
+}
+
+size_t littleFsFreeBytes() {
+  const size_t total = LittleFS.totalBytes();
+  const size_t used = LittleFS.usedBytes();
+  return total > used ? total - used : 0;
+}
+
+void purgeCacheForSpace(size_t requiredBytes, const String& keepPath = "") {
+  if (!LittleFS.exists("/cache")) LittleFS.mkdir("/cache");
+  if (littleFsFreeBytes() >= requiredBytes) return;
+
+  File root = LittleFS.open("/cache");
+  if (!root || !root.isDirectory()) return;
+
+  for (File file = root.openNextFile(); file && littleFsFreeBytes() < requiredBytes;
+       file = root.openNextFile()) {
+    String path = file.path();
+    const size_t size = file.size();
+    file.close();
+    if (path == keepPath) continue;
+    if (!path.startsWith("/cache/")) continue;
+    if (LittleFS.remove(path)) {
+      Serial.printf("[logo] cache helyfelszabaditas: %s (%u byte)\n",
+                    path.c_str(), static_cast<unsigned>(size));
+    }
+    delay(0);
+  }
+  root.close();
+}
+
+}  // namespace
+
+bool LogoManager::downloadRadioBrowserLogo(const String& streamUrl,
+                                           const String& homepage,
+                                           const String& key,
+                                           String& imagePath) {
+  const String favicon = radioBrowserFaviconForStream(streamUrl);
+  if (favicon.isEmpty()) return false;
+
+  String resolved = favicon;
+  if (!isRemote(resolved)) {
+    const String base = isRemote(homepage) ? homepage : streamUrl;
+    resolved = resolveRelativeUrl(resolved, base);
+  }
+  if (!isRemote(resolved)) return false;
+
+  Serial.printf("[logo] radio-browser: %s\n", resolved.c_str());
+  return downloadRemote(resolved, key, imagePath);
+}
+
+void LogoManager::begin() {
+  if (!LittleFS.exists("/cache")) LittleFS.mkdir("/cache");
+  mutex_ = xSemaphoreCreateMutex();
+  enforceCacheBudget();
+  refreshSelection();
+  Serial.println("[logo] cache kesz");
+}
+
+void LogoManager::selectStation(const String& configuredSource,
+                                const String& streamUrl,
+                                const String& homepage,
+                                const String& stationName) {
+  stationSource_ = configuredSource;
+  stationSource_.trim();
+  if (stationSource_.isEmpty()) stationSource_ = "nologo";
+  streamUrl_ = streamUrl;
+  homepage_ = homepage;
+  homepage_.trim();
+  stationName_ = stationName;
+  stationName_.trim();
+  Serial.printf("[logo] allomas: source=%s stream=%s\n",
+                stationSource_.c_str(), streamUrl_.c_str());
+  icySource_ = "";
+  embeddedKey_ = "";
+  embeddedUrl_ = "";
+  embeddedSegments_.clear();
+  radioBrowserLoaded_ = false;
+  radioBrowserKey_ = stationName_;
+  if (radioBrowserKey_.isEmpty()) radioBrowserKey_ = stationSource_;
+  if (!streamUrl_.isEmpty()) {
+    if (!radioBrowserKey_.isEmpty()) radioBrowserKey_ += "|";
+    radioBrowserKey_ += streamUrl_;
+  }
+  if (!homepage_.isEmpty()) {
+    if (!radioBrowserKey_.isEmpty()) radioBrowserKey_ += "|";
+    radioBrowserKey_ += homepage_;
+  }
+  failedSources_.clear();
+  ++selectionId_;
+  searchStartedAt_ = millis();
+  searchFinished_ = false;
+  String noLogoThumbnail;
+  currentPath_ = findCachedThumbnail("nologo", noLogoThumbnail)
+                     ? noLogoThumbnail
+                     : String("/logos/nologo.png");
+  refreshSelection();
+}
+
+void LogoManager::setIcyLogo(const String& rawLogo,
+                             const String& streamUrl) {
+  const String resolved = resolveIcyUrl(rawLogo, streamUrl);
+  if (resolved.isEmpty() || resolved == icySource_) return;
+  icySource_ = resolved;
+  refreshSelection();
+  Serial.printf("[logo] icy-logo: %s\n", icySource_.c_str());
+}
+
+void LogoManager::setEmbeddedImage(
+    const String& streamUrl, const std::vector<uint32_t>& segments) {
+  if (streamUrl.isEmpty() || segments.size() < 2 ||
+      segments.size() % 2 != 0 ||
+      segments.size() / 2 > kMaximumEmbeddedSegments)
+    return;
+  size_t total = 0;
+  for (size_t index = 0; index + 1 < segments.size(); index += 2) {
+    if (!segments[index + 1]) return;
+    total += segments[index + 1];
+    if (total > kMaximumArtworkBytes) return;
+  }
+  String key = "embedded:" + streamUrl;
+  for (size_t index = 0; index + 1 < segments.size(); index += 2) {
+    key += ":" + String(segments[index]) + "+" + String(segments[index + 1]);
+  }
+  if (key == embeddedKey_) return;
+  embeddedKey_ = key;
+  embeddedUrl_ = streamUrl;
+  embeddedSegments_ = segments;
+  refreshSelection();
+  Serial.printf("[logo] beagyazott kep: %u reszlet, %u byte\n",
+                static_cast<unsigned>(segments.size() / 2),
+                static_cast<unsigned>(total));
+}
+
+void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
+  processResult();
+
+  if (maintenance_) return;
+  if (task_) return;
+  if (browserPending_) {
+    const String source = browserSource_;
+    const String path = browserTemporaryPath_;
+    browserPending_ = false;
+    startJob(JobKind::BrowserImport, source, "", path);
+    return;
+  }
+
+  if ((stationSource_ == "nologo" || stationSource_.isEmpty()) &&
+      LittleFS.exists("/logos/nologo.png")) {
+    String noLogoThumbnail;
+    if (findCachedThumbnail("nologo", noLogoThumbnail)) {
+      if (currentPath_ == "/logos/nologo.png") currentPath_ = noLogoThumbnail;
+    } else {
+      startJob(JobKind::Thumbnail, "nologo", "", "/logos/nologo.png");
+      return;
+    }
+  }
+
+  // A valid local assignment remains authoritative for the whole station
+  // lifetime. Cached artwork and later stream metadata must not replace it.
+  const String configuredLocal = localLogoPath(stationSource_);
+  if (stationSource_ != "nologo" && !configuredLocal.isEmpty() &&
+      LittleFS.exists(configuredLocal)) {
+    selectedSource_ = stationSource_;
+    String configuredThumbnail;
+    if (findCachedThumbnail(stationSource_, configuredThumbnail)) {
+      currentPath_ = configuredThumbnail;
+      return;
+    }
+    if (currentPath_ != configuredLocal) currentPath_ = configuredLocal;
+    startJob(JobKind::Thumbnail, stationSource_, "", configuredLocal);
+    return;
+  }
+
+  String cached;
+  if (!(stationSource_ == "nologo" && selectedSource_ != "nologo" &&
+        millis() - selectedAt_ < kArtworkDelayMs) &&
+      findCachedThumbnail(selectedSource_, cached)) {
+    if (currentPath_ != cached) currentPath_ = cached;
+    return;
+  }
+
+  const bool selectedConfiguredSource =
+      stationSource_ != "nologo" && !stationSource_.isEmpty() &&
+      selectedSource_ == stationSource_;
+  const bool safeForNetwork =
+      !playbackRunning ||
+      bufferFilledBytes >= (selectedConfiguredSource
+                                ? kMinimumConfiguredLogoBuffer
+                                : kMinimumLogoNetworkBuffer);
+
+  if (!selectedConfiguredSource &&
+      (searchFinished_ ||
+       millis() - searchStartedAt_ >= kNoLogoSearchWindowMs)) {
+    searchFinished_ = true;
+    return;
+  }
+
+  if (selectedSource_ == embeddedKey_ && !embeddedKey_.isEmpty()) {
+    if (millis() - selectedAt_ < kArtworkDelayMs) return;
+    if (safeForNetwork)
+      startJob(JobKind::Embedded, embeddedKey_, embeddedUrl_, "",
+               embeddedSegments_);
+    return;
+  }
+
+  if (isRemote(selectedSource_)) {
+    if (sourceFailed(selectedSource_)) return;
+    if (!selectedConfiguredSource && millis() - selectedAt_ < kArtworkDelayMs)
+      return;
+    if (safeForNetwork)
+      startJob(JobKind::Remote, selectedSource_, selectedSource_);
+    return;
+  }
+
+  const String local = localLogoPath(selectedSource_);
+  if (selectedSource_ != "nologo" && !local.isEmpty() &&
+      LittleFS.exists(local)) {
+    // Local logos need no network safety delay. Convert them immediately to
+    // the RGB565/PSRAM thumbnail so LVGL does not keep decoding an ARGB PNG
+    // while the radio is trying to establish the audio connection.
+    startJob(JobKind::Thumbnail, selectedSource_, "", local);
+    return;
+  }
+
+  if (!radioBrowserKey_.isEmpty() && !radioBrowserLoaded_ &&
+      !sourceFailed(radioBrowserKey_)) {
+    if (millis() - selectedAt_ < kArtworkDelayMs) return;
+    if (safeForNetwork)
+      startJob(JobKind::RadioBrowser, radioBrowserKey_, streamUrl_);
+    return;
+  } else if (selectedSource_ != "nologo") {
+    markSourceFailed(selectedSource_);
+    refreshSelection();
+  }
+}
+
+String LogoManager::currentPath() const { return currentPath_; }
+
+String LogoManager::currentSource() const { return selectedSource_; }
+
+bool LogoManager::needsBrowserImport() const {
+  return isRemote(selectedSource_) && sourceFailed(selectedSource_);
+}
+
+bool LogoManager::queueBrowserPng(const String& sourceUrl,
+                                  const String& temporaryPath) {
+  if (maintenance_) return false;
+  if (!isRemote(sourceUrl) || !temporaryPath.startsWith("/cache/") ||
+      !LittleFS.exists(temporaryPath))
+    return false;
+  if (task_ || browserPending_) return false;
+  browserSource_ = sourceUrl;
+  browserTemporaryPath_ = temporaryPath;
+  browserPending_ = true;
+  return true;
+}
+
+bool LogoManager::enterMaintenance(uint32_t timeoutMs) {
+  maintenance_ = true;
+  browserPending_ = false;
+  const uint32_t startedAt = millis();
+  while (task_ && millis() - startedAt < timeoutMs) delay(10);
+  processResult();
+  return task_ == nullptr;
+}
+
+void LogoManager::refreshSelection() {
+  // A valid statically assigned local logo is authoritative. Do not replace
+  // it with album art, ICY art, or a web search result.
+  const String configuredLocal = localLogoPath(stationSource_);
+  if (stationSource_ != "nologo" && !configuredLocal.isEmpty() &&
+      LittleFS.exists(configuredLocal)) {
+    selectedSource_ = stationSource_;
+    selectedAt_ = millis();
+    String configuredThumbnail;
+    if (findCachedThumbnail(stationSource_, configuredThumbnail)) {
+      currentPath_ = configuredThumbnail;
+    } else {
+      currentPath_ = configuredLocal;
+    }
+    return;
+  }
+
+  String next;
+  if (!embeddedKey_.isEmpty() && !sourceFailed(embeddedKey_)) {
+    next = embeddedKey_;
+  } else if (!icySource_.isEmpty() && !sourceFailed(icySource_)) {
+    next = icySource_;
+  } else if (!stationSource_.isEmpty() && stationSource_ != "nologo" &&
+             !sourceFailed(stationSource_)) {
+    next = stationSource_;
+  } else if (!radioBrowserKey_.isEmpty() && !sourceFailed(radioBrowserKey_)) {
+    next = radioBrowserKey_;
+  }
+  if (next.isEmpty()) next = "nologo";
+  selectedSource_ = next;
+  selectedAt_ = millis();
+
+  // nologo is a real, immediately drawable display state. Keep it visible
+  // while the optional background lookup is running.
+  if (stationSource_ == "nologo") {
+    String noLogoThumbnail;
+    currentPath_ = findCachedThumbnail("nologo", noLogoThumbnail)
+                       ? noLogoThumbnail
+                       : String("/logos/nologo.png");
+  }
+
+  String cached;
+  if (stationSource_ != "nologo" &&
+      findCachedThumbnail(selectedSource_, cached)) {
+    currentPath_ = cached;
+    return;
+  }
+  if (isRemote(selectedSource_)) {
+    String noLogoThumbnail;
+    currentPath_ = findCachedThumbnail("nologo", noLogoThumbnail)
+                       ? noLogoThumbnail
+                       : String("/logos/nologo.png");
+    return;
+  }
+  if (!isRemote(selectedSource_) && selectedSource_ != embeddedKey_) {
+    const String local = localLogoPath(selectedSource_);
+    if (!local.isEmpty() && LittleFS.exists(local)) {
+      currentPath_ = local;
+      return;
+    }
+  }
+
+  // Keep the currently displayed image while a background search is pending
+  // or fails. selectStation() has already installed nologo for a new station.
+  if (currentPath_.isEmpty() || !LittleFS.exists(currentPath_))
+    currentPath_ = "/logos/nologo.png";
+}
+
+bool LogoManager::startJob(JobKind kind, const String& source,
+                           const String& url, const String& localPath,
+                           const std::vector<uint32_t>& segments) {
+  if (task_) return false;
+  Job* job = new (std::nothrow) Job();
+  if (!job) return false;
+  job->owner = this;
+  job->kind = kind;
+  job->source = source;
+  job->url = url;
+  job->localPath = localPath;
+  job->selectionId = selectionId_;
+  job->homepage = homepage_;
+  job->segments = segments;
+  if (xTaskCreatePinnedToCore(taskEntry, "logo", 10240, job, 0, &task_, 0) !=
+      pdPASS) {
+    task_ = nullptr;
+    delete job;
+    return false;
+  }
+  return true;
+}
+
+void LogoManager::taskEntry(void* parameter) {
+  Job* job = static_cast<Job*>(parameter);
+  if (job && job->owner) job->owner->executeJob(*job);
+  delete job;
+  vTaskDelete(nullptr);
+}
+
+void LogoManager::executeJob(Job& job) {
+  String imagePath;
+  String thumbnail;
+  bool success = false;
+
+  switch (job.kind) {
+    case JobKind::Remote:
+      success = downloadRemote(job.url, job.source, imagePath) &&
+                makeThumbnail(imagePath, job.source, thumbnail);
+      if (success) compactCache(imagePath, thumbnail);
+      break;
+    case JobKind::Embedded:
+      success =
+          downloadEmbedded(job.url, job.segments, job.source, imagePath) &&
+          makeThumbnail(imagePath, job.source, thumbnail);
+      if (success) compactCache(imagePath, thumbnail);
+      break;
+    case JobKind::Thumbnail:
+      success = makeThumbnail(job.localPath, job.source, thumbnail);
+      break;
+    case JobKind::BrowserImport:
+      imagePath = job.localPath;
+      success = makeThumbnail(imagePath, job.source, thumbnail);
+      if (success) compactCache(imagePath, thumbnail);
+      break;
+    case JobKind::RadioBrowser:
+      success = downloadRadioBrowserLogo(job.url, job.homepage, job.source,
+                                         imagePath) &&
+                makeThumbnail(imagePath, job.source, thumbnail);
+      if (success) compactCache(imagePath, thumbnail);
+      break;
+  }
+  finishJob(job.source, success ? thumbnail : String(), success,
+            job.selectionId);
+}
+
+void LogoManager::finishJob(const String& source, const String& path,
+                            bool success, uint32_t selectionId) {
+  if (mutex_ && xSemaphoreTake(mutex_, portMAX_DELAY) == pdTRUE) {
+    resultSource_ = source;
+    resultPath_ = path;
+    resultSuccess_ = success;
+    resultSelectionId_ = selectionId;
+    resultReady_ = true;
+    task_ = nullptr;
+    xSemaphoreGive(mutex_);
+  } else {
+    task_ = nullptr;
+  }
+}
+
+void LogoManager::processResult() {
+  if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return;
+  if (!resultReady_) {
+    xSemaphoreGive(mutex_);
+    return;
+  }
+  const String source = resultSource_;
+  const String path = resultPath_;
+  const bool success = resultSuccess_;
+  const uint32_t resultSelectionId = resultSelectionId_;
+  resultReady_ = false;
+  resultSource_ = "";
+  resultPath_ = "";
+  xSemaphoreGive(mutex_);
+
+  if (resultSelectionId != selectionId_) return;
+  const bool resultConfiguredSource =
+      stationSource_ != "nologo" && !stationSource_.isEmpty() &&
+      source == stationSource_;
+  if (!resultConfiguredSource &&
+      millis() - searchStartedAt_ >= kNoLogoSearchWindowMs) {
+    searchFinished_ = true;
+    return;
+  }
+
+  if (success) {
+    Serial.printf("[logo] cache: %s\n", path.c_str());
+    if (!path.isEmpty()) {
+      if (source == "nologo" && currentPath_ == "/logos/nologo.png") {
+        currentPath_ = path;
+      } else if (selectedSource_ == "nologo" && source == radioBrowserKey_) {
+        selectedSource_ = source;
+        currentPath_ = path;
+      } else if (source == selectedSource_) {
+        currentPath_ = path;
+      }
+      if (source != "nologo") searchFinished_ = true;
+    }
+    if (source == radioBrowserKey_) radioBrowserLoaded_ = true;
+  } else {
+    Serial.printf("[logo] sikertelen: %s\n", source.c_str());
+    markSourceFailed(source);
+    const bool keepConfiguredRemoteForBrowser =
+        resultConfiguredSource && isRemote(source);
+    if (keepConfiguredRemoteForBrowser) {
+      String noLogoThumbnail;
+      currentPath_ = findCachedThumbnail("nologo", noLogoThumbnail)
+                         ? noLogoThumbnail
+                         : String("/logos/nologo.png");
+      Serial.println("[logo] varakozas bongeszos importalasra");
+    } else if (source == selectedSource_) {
+      refreshSelection();
+    }
+  }
+}
+
+bool LogoManager::sourceFailed(const String& source) const {
+  for (const String& failed : failedSources_) {
+    if (failed == source) return true;
+  }
+  return false;
+}
+
+void LogoManager::markSourceFailed(const String& source) {
+  if (!source.isEmpty() && !sourceFailed(source))
+    failedSources_.push_back(source);
+}
+
+bool LogoManager::isRemote(const String& value) {
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+
+String LogoManager::resolveIcyUrl(String logo, const String& streamUrl) {
+  logo.trim();
+  if (logo.isEmpty() || isRemote(logo)) return logo;
+  if (logo.startsWith("//"))
+    return String(streamUrl.startsWith("https://") ? "https:" : "http:") +
+           logo;
+  const int schemeEnd = streamUrl.indexOf("://");
+  if (schemeEnd < 0) return logo;
+  const int hostStart = schemeEnd + 3;
+  const int pathStart = streamUrl.indexOf('/', hostStart);
+  const String origin =
+      pathStart > 0 ? streamUrl.substring(0, pathStart) : streamUrl;
+  if (logo.startsWith("/")) return origin + logo;
+  const int lastSlash = streamUrl.lastIndexOf('/');
+  const String base =
+      lastSlash >= hostStart ? streamUrl.substring(0, lastSlash + 1)
+                             : origin + "/";
+  return base + logo;
+}
+
+String LogoManager::localLogoPath(String source) {
+  source.trim();
+  if (source.isEmpty() || source == "nologo") return "/logos/nologo.png";
+  if (isRemote(source) || source.startsWith("embedded:")) return "";
+  if (!source.startsWith("/")) source = "/logos/" + source;
+  if (LittleFS.exists(source)) return source;
+  const int slash = source.lastIndexOf('/');
+  const int dot = source.lastIndexOf('.');
+  if (dot > slash) return source;
+  const char* extensions[] = {".png", ".bmp", ".jpg", ".jpeg"};
+  for (const char* extension : extensions) {
+    const String candidate = source + extension;
+    if (LittleFS.exists(candidate)) return candidate;
+  }
+  return source;
+}
+
+String LogoManager::cacheStem(const String& key) {
+  char path[36];
+  snprintf(path, sizeof(path), "/cache/logo_%08lx",
+           static_cast<unsigned long>(fnv1a(key)));
+  return path;
+}
+
+String LogoManager::thumbnailPath(const String& key) {
+  return cacheStem(key) + ".sr565";
+}
+
+bool LogoManager::validThumbnail(const String& path) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file || file.size() != kThumbnailBytes) {
+    if (file) file.close();
+    return false;
+  }
+  uint8_t header[8]{};
+  const bool valid =
+      file.read(header, sizeof(header)) == sizeof(header) &&
+      header[0] == 'S' && header[1] == 'R' && header[2] == '5' &&
+      header[3] == '7' && readLe16(header + 4) == kThumbnailSize &&
+      readLe16(header + 6) == kThumbnailSize;
+  file.close();
+  return valid;
+}
+
+bool thumbnailHasVisiblePixels(const String& path) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file || file.size() != kThumbnailBytes) {
+    if (file) file.close();
+    return false;
+  }
+  uint8_t header[8]{};
+  if (file.read(header, sizeof(header)) != sizeof(header)) {
+    file.close();
+    return false;
+  }
+  std::vector<uint8_t> pixels(static_cast<size_t>(kThumbnailSize) *
+                              static_cast<size_t>(kThumbnailSize) * 2);
+  const size_t received = file.read(pixels.data(), pixels.size());
+  file.close();
+  if (received != pixels.size()) return false;
+  return hasVisiblePixels(pixels.data(),
+                          static_cast<size_t>(kThumbnailSize) *
+                              static_cast<size_t>(kThumbnailSize));
+}
+
+bool LogoManager::findCachedThumbnail(const String& key, String& path) {
+  if (key.isEmpty()) return false;
+  const String candidate = thumbnailPath(key);
+  if (!validThumbnail(candidate) || !thumbnailHasVisiblePixels(candidate)) {
+    if (LittleFS.exists(candidate)) LittleFS.remove(candidate);
+    return false;
+  }
+  path = candidate;
+  return true;
+}
+
+bool LogoManager::downloadRemote(const String& url, const String& key,
+                                 String& imagePath) {
+  // Prefer the secure URL. Some image CDNs reject the HTTP endpoint or return
+  // a redirect that the ESP32 client cannot reproduce reliably.
+  if (url.startsWith("http://")) {
+    const String secure = "https://" + url.substring(7);
+    Serial.printf("[logo] HTTPS proba: %s\n", secure.c_str());
+    if (downloadAttempt(secure, key, imagePath)) return true;
+  }
+  if (downloadAttempt(url, key, imagePath)) return true;
+  if (url.startsWith("https://")) {
+    const String plain = "http://" + url.substring(8);
+    Serial.printf("[logo] HTTP tartalek: %s\n", plain.c_str());
+    return downloadAttempt(plain, key, imagePath);
+  }
+  return false;
+}
+
+String LogoManager::resolveRelativeUrl(String value,
+                                       const String& baseUrl) {
+  value.trim();
+  if (value.isEmpty() || isRemote(value)) return value;
+  if (value.startsWith("//"))
+    return String(baseUrl.startsWith("https://") ? "https:" : "http:") +
+           value;
+  const int schemeEnd = baseUrl.indexOf("://");
+  if (schemeEnd < 0) return "";
+  const int hostStart = schemeEnd + 3;
+  const int pathStart = baseUrl.indexOf('/', hostStart);
+  const String origin =
+      pathStart > 0 ? baseUrl.substring(0, pathStart) : baseUrl;
+  if (value.startsWith("/")) return origin + value;
+  const int lastSlash = baseUrl.lastIndexOf('/');
+  const String base =
+      lastSlash >= hostStart ? baseUrl.substring(0, lastSlash + 1)
+                             : origin + "/";
+  return base + value;
+}
+
+bool LogoManager::downloadAttempt(const String& fetchUrl, const String& key,
+                                  String& imagePath) {
+  Serial.printf("[logo] letoltes: %s\n", fetchUrl.c_str());
+  HTTPClient http;
+  NetworkClient plainClient;
+  NetworkClientSecure secureClient;
+  NetworkClient* client = &plainClient;
+  if (fetchUrl.startsWith("https://")) {
+    secureClient.setInsecure();
+    client = &secureClient;
+  }
+  http.setConnectTimeout(4000);
+  http.setTimeout(6000);
+  http.setUserAgent("LVGL-Radio/1.0 ESP32");
+  http.addHeader("Accept",
+                 "image/jpeg,image/png,image/webp,image/bmp,*/*;q=0.8");
+  http.addHeader("Referer", "https://www.radio.pl/");
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(*client, fetchUrl)) return false;
+  const int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("[logo] HTTP hiba %d: %s\n", code, fetchUrl.c_str());
+    http.end();
+    return false;
+  }
+  const int declaredLength = http.getSize();
+  if (declaredLength == 0 ||
+      (declaredLength > 0 &&
+       static_cast<size_t>(declaredLength) > kMaximumArtworkBytes)) {
+    http.end();
+    return false;
+  }
+  const size_t expectedBytes =
+      declaredLength > 0 ? static_cast<size_t>(declaredLength)
+                         : kMinimumArtworkFreeBytes;
+  purgeCacheForSpace(expectedBytes + kMinimumArtworkFreeBytes);
+  if (littleFsFreeBytes() < expectedBytes) {
+    Serial.printf("[logo] nincs eleg LittleFS hely: szabad=%u kell=%u\n",
+                  static_cast<unsigned>(littleFsFreeBytes()),
+                  static_cast<unsigned>(expectedBytes));
+    http.end();
+    return false;
+  }
+  const String temporary = cacheStem(key) + ".tmp";
+  if (LittleFS.exists(temporary)) LittleFS.remove(temporary);
+  File output = LittleFS.open(temporary, FILE_WRITE);
+  if (!output) {
+    http.end();
+    return false;
+  }
+  NetworkClient* stream = http.getStreamPtr();
+  uint8_t buffer[1024];
+  size_t written = 0;
+  uint32_t lastReadAt = millis();
+  while ((http.connected() || stream->available()) &&
+         (declaredLength < 0 ||
+          written < static_cast<size_t>(declaredLength))) {
+    const size_t available = stream->available();
+    if (!available) {
+      if (millis() - lastReadAt > kReadIdleTimeoutMs) break;
+      vTaskDelay(1);
+      continue;
+    }
+    size_t requested = min(available, sizeof(buffer));
+    if (declaredLength > 0)
+      requested =
+          min(requested, static_cast<size_t>(declaredLength) - written);
+    const int received = stream->readBytes(buffer, requested);
+    if (received <= 0 ||
+        output.write(buffer, received) != static_cast<size_t>(received))
+      break;
+    written += received;
+    lastReadAt = millis();
+    if (written > kMaximumArtworkBytes) break;
+    vTaskDelay(1);
+  }
+  output.flush();
+  output.close();
+  http.end();
+  if (!written || written > kMaximumArtworkBytes ||
+      (declaredLength > 0 && written != static_cast<size_t>(declaredLength))) {
+    Serial.printf("[logo] incomplet kep: %u byte, vart=%d: %s\n",
+                  static_cast<unsigned>(written), declaredLength,
+                  fetchUrl.c_str());
+    LittleFS.remove(temporary);
+    return false;
+  }
+  String extension = detectImageExtension(temporary);
+  if (extension.isEmpty()) {
+    Serial.printf("[logo] ismeretlen kepformatum: %s\n", fetchUrl.c_str());
+    const bool ico = extractCompressedIco(temporary, key, imagePath);
+    LittleFS.remove(temporary);
+    return ico;
+  }
+  imagePath = cacheStem(key) + extension;
+  if (LittleFS.exists(imagePath)) LittleFS.remove(imagePath);
+  if (!LittleFS.rename(temporary, imagePath)) {
+    LittleFS.remove(temporary);
+    return false;
+  }
+  return true;
+}
+
+bool LogoManager::appendHttpRange(const String& url, uint32_t offset,
+                                  uint32_t length, File& output) {
+  if (!length || length > kMaximumArtworkBytes) return false;
+  HTTPClient http;
+  NetworkClient plainClient;
+  NetworkClientSecure secureClient;
+  NetworkClient* client = &plainClient;
+  if (url.startsWith("https://")) {
+    secureClient.setInsecure();
+    client = &secureClient;
+  }
+  http.setConnectTimeout(4000);
+  http.setTimeout(5000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(*client, url)) return false;
+  http.addHeader("Range", "bytes=" + String(offset) + "-" +
+                              String(offset + length - 1));
+  const int code = http.GET();
+  if (code != HTTP_CODE_PARTIAL_CONTENT) {
+    http.end();
+    return false;
+  }
+  NetworkClient* stream = http.getStreamPtr();
+  uint8_t buffer[1024];
+  uint32_t remaining = length;
+  uint32_t lastReadAt = millis();
+  while ((http.connected() || stream->available()) && remaining) {
+    const size_t available = stream->available();
+    if (!available) {
+      if (millis() - lastReadAt > kReadIdleTimeoutMs) break;
+      vTaskDelay(1);
+      continue;
+    }
+    size_t requested = min(available, sizeof(buffer));
+    requested = min(requested, static_cast<size_t>(remaining));
+    const int received = stream->readBytes(buffer, requested);
+    if (received <= 0 ||
+        output.write(buffer, received) != static_cast<size_t>(received))
+      break;
+    remaining -= received;
+    lastReadAt = millis();
+    vTaskDelay(1);
+  }
+  http.end();
+  return remaining == 0;
+}
+
+bool LogoManager::downloadEmbedded(
+    const String& url, const std::vector<uint32_t>& segments,
+    const String& key, String& imagePath) {
+  const String temporary = cacheStem(key) + ".emb";
+  if (LittleFS.exists(temporary)) LittleFS.remove(temporary);
+  File output = LittleFS.open(temporary, FILE_WRITE);
+  if (!output) return false;
+  for (size_t index = 0; index + 1 < segments.size(); index += 2) {
+    if (!appendHttpRange(url, segments[index], segments[index + 1], output)) {
+      output.close();
+      LittleFS.remove(temporary);
+      return false;
+    }
+  }
+  output.flush();
+  output.close();
+  const bool success = normalizeEmbedded(temporary, key, imagePath);
+  LittleFS.remove(temporary);
+  return success;
+}
+
+bool LogoManager::normalizeEmbedded(const String& temporaryPath,
+                                    const String& key, String& imagePath) {
+  File file = LittleFS.open(temporaryPath, FILE_READ);
+  if (!file) return false;
+  const size_t size = file.size();
+  file.close();
+  if (normalizePayload(temporaryPath, 0, size, key, imagePath)) return true;
+
+  file = LittleFS.open(temporaryPath, FILE_READ);
+  uint32_t pictureType = 0;
+  uint32_t mimeLength = 0;
+  if (file && readBe32(file, pictureType) && readBe32(file, mimeLength) &&
+      pictureType <= 20 && mimeLength > 4 && mimeLength < 80 &&
+      file.seek(file.position() + mimeLength)) {
+    uint32_t descriptionLength = 0;
+    if (readBe32(file, descriptionLength) && descriptionLength < 4096 &&
+        file.seek(file.position() + descriptionLength + 16)) {
+      uint32_t dataLength = 0;
+      if (readBe32(file, dataLength)) {
+        const size_t dataOffset = file.position();
+        file.close();
+        if (dataLength && dataLength <= kMaximumArtworkBytes &&
+            dataOffset + dataLength <= size &&
+            normalizePayload(temporaryPath, dataOffset, dataLength, key,
+                             imagePath))
+          return true;
+      }
+    }
+  }
+  if (file) file.close();
+
+  file = LittleFS.open(temporaryPath, FILE_READ);
+  const int encoding = file ? file.read() : -1;
+  if (encoding >= 0 && size > 16) {
+    String mime;
+    while (file.available() && mime.length() < 80) {
+      const int character = file.read();
+      if (character <= 0) break;
+      mime += static_cast<char>(character);
+    }
+    if (mime.startsWith("image/") && file.available()) {
+      file.read();
+      size_t guard = 0;
+      if (encoding == 1 || encoding == 2) {
+        int previous = -1;
+        while (file.available() && guard++ < 1024) {
+          const int character = file.read();
+          if (previous == 0 && character == 0) break;
+          previous = character;
+        }
+      } else {
+        while (file.available() && guard++ < 1024) {
+          if (file.read() == 0) break;
+        }
+      }
+      const size_t dataOffset = file.position();
+      file.close();
+      if (dataOffset < size)
+        return normalizePayload(temporaryPath, dataOffset, size - dataOffset,
+                                key, imagePath);
+    }
+  }
+  if (file) file.close();
+  return false;
+}
+
+bool LogoManager::normalizePayload(const String& sourcePath, size_t offset,
+                                   size_t length, const String& key,
+                                   String& imagePath) {
+  if (!length || length > kMaximumArtworkBytes) return false;
+  const String payload = cacheStem(key) + ".payload";
+  if (!copyFileRange(sourcePath, offset, length, payload)) return false;
+  const String extension = detectImageExtension(payload);
+  if (extension.isEmpty()) {
+    const bool ico = extractCompressedIco(payload, key, imagePath);
+    LittleFS.remove(payload);
+    return ico;
+  }
+  imagePath = cacheStem(key) + extension;
+  if (LittleFS.exists(imagePath)) LittleFS.remove(imagePath);
+  if (!LittleFS.rename(payload, imagePath)) {
+    LittleFS.remove(payload);
+    return false;
+  }
+  return true;
+}
+
+bool LogoManager::extractCompressedIco(const String& sourcePath,
+                                       const String& key, String& imagePath) {
+  File file = LittleFS.open(sourcePath, FILE_READ);
+  if (!file || file.size() < 22) {
+    if (file) file.close();
+    return false;
+  }
+  uint8_t header[6]{};
+  if (file.read(header, sizeof(header)) != sizeof(header) ||
+      readLe16(header) != 0 || readLe16(header + 2) != 1) {
+    file.close();
+    return false;
+  }
+  const uint16_t count = readLe16(header + 4);
+  if (!count || count > 32 || file.size() < 6 + count * 16) {
+    file.close();
+    return false;
+  }
+  uint32_t bestOffset = 0;
+  uint32_t bestLength = 0;
+  uint16_t bestSize = 0;
+  for (uint16_t index = 0; index < count; ++index) {
+    uint8_t entry[16]{};
+    if (!file.seek(6 + index * 16) ||
+        file.read(entry, sizeof(entry)) != sizeof(entry))
+      break;
+    const uint16_t width = entry[0] ? entry[0] : 256;
+    const uint16_t height = entry[1] ? entry[1] : 256;
+    const uint32_t bytes = readLe32(entry + 8);
+    const uint32_t offset = readLe32(entry + 12);
+    uint8_t signature[4]{};
+    if (!bytes || bytes > kMaximumArtworkBytes ||
+        offset + bytes > file.size() || !file.seek(offset) ||
+        file.read(signature, sizeof(signature)) != sizeof(signature))
+      continue;
+    const bool compressed =
+        (signature[0] == 0x89 && signature[1] == 'P' &&
+         signature[2] == 'N' && signature[3] == 'G') ||
+        (signature[0] == 0xFF && signature[1] == 0xD8 &&
+         signature[2] == 0xFF);
+    const uint16_t dimension = max(width, height);
+    if (compressed &&
+        (!bestLength || abs(static_cast<int>(dimension) - 128) <
+                            abs(static_cast<int>(bestSize) - 128))) {
+      bestOffset = offset;
+      bestLength = bytes;
+      bestSize = dimension;
+    }
+  }
+  file.close();
+  if (!bestLength) return false;
+  return normalizePayload(sourcePath, bestOffset, bestLength,
+                          key + ":ico", imagePath);
+}
+
+String LogoManager::detectImageExtension(const String& path) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file) return "";
+  uint8_t header[12]{};
+  const size_t read = file.read(header, sizeof(header));
+  file.close();
+  if (read >= 8 && header[0] == 0x89 && header[1] == 'P' &&
+      header[2] == 'N' && header[3] == 'G')
+    return ".png";
+  if (read >= 3 && header[0] == 0xFF && header[1] == 0xD8 &&
+      header[2] == 0xFF)
+    return ".jpg";
+  if (read >= 2 && header[0] == 'B' && header[1] == 'M') return ".bmp";
+  if (read >= 12 && header[0] == 'R' && header[1] == 'I' &&
+      header[2] == 'F' && header[3] == 'F' && header[8] == 'W' &&
+      header[9] == 'E' && header[10] == 'B' && header[11] == 'P')
+    return ".webp";
+  return "";
+}
+
+bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
+                                String& thumbnail) {
+  thumbnail = thumbnailPath(key);
+  if (validThumbnail(thumbnail)) return true;
+  ImageSize size;
+  if (!readImageSize(imagePath, size)) {
+    Serial.printf("[logo] kepmeret olvasasi hiba: %s\n", imagePath.c_str());
+    return false;
+  }
+
+  lgfx::LGFX_Sprite sprite;
+  sprite.setPsram(true);
+  sprite.setColorDepth(16);
+  if (!sprite.createSprite(kThumbnailSize, kThumbnailSize)) return false;
+  sprite.fillSprite(0x0000);
+
+  const uint16_t largestDimension = max(size.width, size.height);
+  const float decodeScale =
+      largestDimension > kMaximumDecodeDimension
+          ? static_cast<float>(kMaximumDecodeDimension) / largestDimension
+          : 1.0f;
+  const int32_t decodedWidth =
+      max<int32_t>(1, lroundf(size.width * decodeScale));
+  const int32_t decodedHeight =
+      max<int32_t>(1, lroundf(size.height * decodeScale));
+  lgfx::LGFX_Sprite decoded;
+  decoded.setPsram(true);
+  decoded.setColorDepth(16);
+  if (!decoded.createSprite(decodedWidth, decodedHeight)) {
+    sprite.deleteSprite();
+    return false;
+  }
+  decoded.fillSprite(0x0000);
+
+  String lower = imagePath;
+  lower.toLowerCase();
+  bool drawn = false;
+  if (lower.endsWith(".png")) {
+    drawn = decoded.drawPngFile(
+        LittleFS, imagePath.c_str(), 0, 0, decodedWidth, decodedHeight, 0, 0,
+        decodeScale, decodeScale, top_left);
+    decoded.releasePngMemory();
+  } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    drawn = decoded.drawJpgFile(
+        LittleFS, imagePath.c_str(), 0, 0, decodedWidth, decodedHeight, 0, 0,
+        decodeScale, decodeScale, top_left);
+  } else if (lower.endsWith(".bmp")) {
+    drawn = decoded.drawBmpFile(
+        LittleFS, imagePath.c_str(), 0, 0, decodedWidth, decodedHeight, 0, 0,
+        decodeScale, decodeScale, top_left);
+  } else if (lower.endsWith(".webp")) {
+    drawn = decodeStbSprite(imagePath, decoded, decodedWidth, decodedHeight);
+  }
+  if (!drawn && (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+                 lower.endsWith(".png") || lower.endsWith(".bmp"))) {
+    Serial.printf("[logo] stb tartalek dekoder: %s\n", imagePath.c_str());
+    drawn = decodeStbSprite(imagePath, decoded, decodedWidth, decodedHeight);
+  }
+  if (!drawn) {
+    Serial.printf("[logo] kepdekodolas sikertelen: %s\n", imagePath.c_str());
+    decoded.deleteSprite();
+    sprite.deleteSprite();
+    return false;
+  }
+
+  const float finalScale =
+      min(static_cast<float>(kThumbnailSize) / decodedWidth,
+          static_cast<float>(kThumbnailSize) / decodedHeight);
+  const int32_t finalWidth =
+      max<int32_t>(1, lroundf(decodedWidth * finalScale));
+  const int32_t finalHeight =
+      max<int32_t>(1, lroundf(decodedHeight * finalScale));
+  if (finalWidth == decodedWidth && finalHeight == decodedHeight) {
+    decoded.pushSprite(&sprite, (kThumbnailSize - finalWidth) / 2,
+                       (kThumbnailSize - finalHeight) / 2);
+  } else {
+    decoded.setPivot(decodedWidth / 2, decodedHeight / 2);
+    decoded.pushRotateZoomWithAA(&sprite, kThumbnailSize / 2.0f,
+                                 kThumbnailSize / 2.0f, 0.0f, finalScale,
+                                 finalScale);
+  }
+  decoded.deleteSprite();
+
+  if (!hasVisiblePixels(static_cast<const uint8_t*>(sprite.getBuffer()),
+                        static_cast<size_t>(kThumbnailSize) * kThumbnailSize)) {
+    sprite.deleteSprite();
+    return false;
+  }
+
+  const String temporary = thumbnail + ".tmp";
+  if (LittleFS.exists(temporary)) LittleFS.remove(temporary);
+  File output = LittleFS.open(temporary, FILE_WRITE);
+  if (!output) {
+    sprite.deleteSprite();
+    return false;
+  }
+  const uint8_t header[8] = {
+      'S', 'R', '5', '7',
+      static_cast<uint8_t>(kThumbnailSize & 0xFF),
+      static_cast<uint8_t>(kThumbnailSize >> 8),
+      static_cast<uint8_t>(kThumbnailSize & 0xFF),
+      static_cast<uint8_t>(kThumbnailSize >> 8),
+  };
+  const uint8_t* pixels =
+      static_cast<const uint8_t*>(sprite.getBuffer());
+  const size_t bytes =
+      static_cast<size_t>(kThumbnailSize) * kThumbnailSize * 2;
+  bool success = output.write(header, sizeof(header)) == sizeof(header);
+  size_t written = 0;
+  while (success && written < bytes) {
+    const size_t chunk = min<size_t>(4096, bytes - written);
+    success = output.write(pixels + written, chunk) == chunk;
+    written += chunk;
+    vTaskDelay(1);
+  }
+  output.flush();
+  output.close();
+  sprite.deleteSprite();
+  if (!success) {
+    LittleFS.remove(temporary);
+    return false;
+  }
+  if (LittleFS.exists(thumbnail)) LittleFS.remove(thumbnail);
+  if (!LittleFS.rename(temporary, thumbnail)) {
+    LittleFS.remove(temporary);
+    return false;
+  }
+  enforceCacheBudget(thumbnail);
+  return true;
+}
+
+void LogoManager::compactCache(const String& imagePath,
+                               const String& thumbnail) {
+  if (imagePath.startsWith("/cache/") && imagePath != thumbnail)
+    LittleFS.remove(imagePath);
+}
+
+void LogoManager::enforceCacheBudget(const String& keepPath) {
+  size_t total = 0;
+  File root = LittleFS.open("/cache");
+  if (!root || !root.isDirectory()) return;
+  for (File file = root.openNextFile(); file; file = root.openNextFile())
+    total += file.size();
+  root.close();
+  if (total <= kMaximumCacheBytes) return;
+
+  root = LittleFS.open("/cache");
+  for (File file = root.openNextFile();
+       file && total > kTargetCacheBytes; file = root.openNextFile()) {
+    const String path = file.path();
+    const size_t size = file.size();
+    file.close();
+    if (path == keepPath || path.endsWith(".tmp")) continue;
+    if (LittleFS.remove(path)) total = total > size ? total - size : 0;
+  }
+  root.close();
+}
