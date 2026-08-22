@@ -73,10 +73,11 @@
 /****************************************/
 /*  I2S DAC  */
 
-/* PCM5102A  DAC */
+/* CS4344 / PCM5102A DAC */
 #define I2S_DOUT 38
 #define I2S_BCLK 21
 #define I2S_LRC  47
+//#define I2S_MCLK 17
 
 /* ENCODER 1 */
 #define ENC_BTNR 6 // S2
