@@ -43,7 +43,7 @@ Invertálási fájlok:
 
 ---
 
-# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
+# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A/CS4344 with MCLK pin
 
 Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 `options.h` hardverkiosztásához.
@@ -279,7 +279,7 @@ gombját (`GPIO5`).
 
 # English Summary
 
-## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
+## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A/CS4344 with MCLK pin
 
 This project is a modular LVGL-based internet radio and local network music
 player for the hardware layout defined in `options.h`.
