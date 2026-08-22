@@ -281,8 +281,8 @@ kalibráláshoz bekapcsolás vagy reset közben tartsd nyomva az első encoder
 gombját (`GPIO5`).
 
 Az ILI9488 kapacitív és ST7796 kijelzők kezeléséban nyújtott segítségért köszönet illeti: ([<b>Simon Zsolt</b>](https://github.com/SimZs))
----
 
+---
 # English Summary
 
 ## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
