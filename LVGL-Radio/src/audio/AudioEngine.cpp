@@ -221,7 +221,11 @@ bool AudioEngine::begin(uint8_t volume) {
   // ennek ellenére minden egyes PCM mintán három lebegőpontos biquadot
   // számolna, ezért sík hangszínnél teljesen kihagyjuk.
   audio_.settings.IIR_FILTER = false;
+#ifdef I2S_MCLK
   if (!audio_.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT, I2S_MCLK)) {
+#else
+  if (!audio_.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT)) {
+#endif
     Serial.println("[audio] I2S labkiosztasi hiba");
     statusText_ = "I2S indítási hiba";
     stateCode_ = "I2S!";
