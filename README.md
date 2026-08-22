@@ -4,7 +4,7 @@
   <img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio.jpg" alt="480x320" width="480"><img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio_2.jpg" alt="480x320" width="480">
 </p>
 
-## ILI9488 / ST7796 kijelző és FT6X36 kapacitív érintés
+## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
 
 - Külön FT6X36 touch profil.
 - ILI9488 és ST7796 kijelzőprofil támogatás.
@@ -280,6 +280,8 @@ Az érintő kalibrációja NVS-be kerül, ezért csak egyszer fut le. Új
 kalibráláshoz bekapcsolás vagy reset közben tartsd nyomva az első encoder
 gombját (`GPIO5`).
 
+---
+Az ILI9488 kapacitív és ST7796 kijelzők kezeléséban nyújtott segítségért köszönet illeti: <b>Simon Zsolt</b>└
 ---
 
 # English Summary
