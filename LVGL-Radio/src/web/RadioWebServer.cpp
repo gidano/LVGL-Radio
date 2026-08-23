@@ -237,6 +237,8 @@ void RadioWebServer::registerRoutes() {
                      String(radio_.volumeGraphicVisible() ? "true" : "false") +
                      ",\"diagnostics\":" +
                      String(radio_.diagnosticsVisible() ? "true" : "false") +
+                     ",\"albumCovers\":" +
+                     String(radio_.albumCoversEnabled() ? "true" : "false") +
                      "},\"weather\":{\"enabled\":" +
                      String(weather.enabled ? "true" : "false") +
                      ",\"latitude\":" + String(weather.latitude, 4) +
@@ -354,6 +356,13 @@ void RadioWebServer::registerRoutes() {
       radio_.setDiagnosticsVisible(diagnostics == "true" ||
                                    diagnostics == "1");
     }
+    String albumCovers = argument("albumCovers");
+    if (albumCovers.isEmpty() && !body.isEmpty())
+      albumCovers = jsonStringField(body, "albumCovers");
+    if (!albumCovers.isEmpty()) {
+      radio_.setAlbumCoversEnabled(albumCovers == "true" ||
+                                   albumCovers == "1");
+    }
     WeatherConfig weather = radio_.weatherConfig();
     String weatherEnabled = argument("weatherEnabled");
     if (weatherEnabled.isEmpty() && !body.isEmpty())
@@ -466,6 +475,8 @@ void RadioWebServer::registerRoutes() {
                      String(radio_.volumeGraphicVisible() ? "true" : "false") +
                      ",\"diagnostics\":" +
                      String(radio_.diagnosticsVisible() ? "true" : "false") +
+                     ",\"albumCovers\":" +
+                     String(radio_.albumCoversEnabled() ? "true" : "false") +
                      "},\"weather\":{\"enabled\":" +
                      String(weather.enabled ? "true" : "false") +
                      ",\"latitude\":" + String(weather.latitude, 4) +
