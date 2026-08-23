@@ -1,4 +1,4 @@
-181.FM - CLASSICAL GUITAR	http://listen.181fm.com/181-classicalguitar_128k.mp3	https://player.181fm.com/configs/images/181fm.png
+181.FM - CLASSIC. GUITAR	http://listen.181fm.com/181-classicalguitar_128k.mp3	https://player.181fm.com/configs/images/181fm.png
 181.FM - REAL COUNTRY	https://listen.181fm.com/181-realcountry_128k.mp3	https://player.181fm.com/configs/images/181fm.png
 181.FM - REGGAE ROOTS	http://listen.181fm.com/181-reggae_128k.mp3	https://player.181fm.com/configs/images/181fm.png
 181.FM - UK TOP 40	http://listen.181fm.com/181-uktop40_128k.mp3	https://player.181fm.com/configs/images/181fm.png
@@ -55,7 +55,7 @@ POPTARISZNYA	http://adas.poptarisznya.hu:8200/live.mp3/	poptarisznya
 POPTARISZNYA OLDIES	http://adas.poptarisznya.hu:8200/oldies.mp3	poptarisznya
 QUEEN	https://nl4.mystreaming.net/er/queen/icecast.audio	https://static2.mytuner.mobi/media/tvos_radios/jueykda5xdel.png
 RADIO BLUES	http://streams.radiomast.io/radioblues-flac	radioblues_flac
-RADIO CAPITAL FUNKY TOWN	https://4c4b867c89244861ac216426883d1ad0.msvdn.net/radiocapitalfunkytown/radiocapitalfunkytown/master_ma.m3u8	/logos/rb-571ecf3e-f348-4bdb-b30d-31e2a20e8fe9.png
+RADIO CAP. FUNKY TOWN	https://4c4b867c89244861ac216426883d1ad0.msvdn.net/radiocapitalfunkytown/radiocapitalfunkytown/master_ma.m3u8	/logos/rb-571ecf3e-f348-4bdb-b30d-31e2a20e8fe9.png
 RADIO COMEDY	https://a7.asurahosting.com:8430/radio.mp3	radio_comedy
 RADIO ITALO4YOU	https://ssl-1.radiohost.pl:8018/stream	radio_italo4you
 RADIO PARADISE MAIN MIX	http://stream-uk1.radioparadise.com/aac-320	https://radioparadise.com/apple-touch-icon.png
@@ -73,7 +73,6 @@ RÁDIÓ 1	https://icast.connectmedia.hu/5201/live.mp3	radio1
 RÁDIÓ F.R.S.H. SIÓFOK	https://radiofrsh.com:8000/stream	https://radiofrsh.eu/vinyl.webp
 SLÁGER FM	http://92.61.114.159:7812/slagerfm256.mp3	slager_fm
 SOMA FM REGGAE	https://ice2.somafm.com/reggae-128-mp3	soma_fm
-SUNSHINE FM	http://stream.composeit.hu:8100/sunshine	sunshine_fm
 SUPERDJ	https://stream.diazol.hu:35150/stream	superdj
 TAYLOR SWIFT	https://nl4.mystreaming.net/er/taylorswift/icecast.audio	https://static2.mytuner.mobi/media/tvos_radios/jueykda5xdel.png
 TECHNOLOVERS.FM - TECHNO	https://stream.technolovers.fm/techno	https://www.radio.pl/300/technoloverstechno.jpeg
