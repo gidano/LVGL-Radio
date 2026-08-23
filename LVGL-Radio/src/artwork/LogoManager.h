@@ -17,6 +17,8 @@ class LogoManager {
   void setIcyLogo(const String& rawLogo, const String& streamUrl);
   void setEmbeddedImage(const String& streamUrl,
                         const std::vector<uint32_t>& segments);
+  void setAlbumCoversEnabled(bool enabled);
+  bool albumCoversEnabled() const;
   void setAlbumTitle(const String& combinedTitle);
   void loop(bool playbackRunning, size_t bufferFilledBytes);
 
@@ -113,6 +115,7 @@ class LogoManager {
   std::vector<uint32_t> embeddedSegments_;
   String albumTitle_;
   String albumKey_;
+  bool albumCoversEnabled_{true};
   uint32_t albumRequestedAt_{0};
   uint32_t albumStatusLoggedAt_{0};
   String pendingAlbumPurgeKey_;

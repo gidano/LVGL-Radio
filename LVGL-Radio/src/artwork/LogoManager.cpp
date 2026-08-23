@@ -55,6 +55,7 @@ constexpr uint32_t kNoLogoSearchWindowMs = 20000;
 constexpr uint32_t kAlbumStatusLogIntervalMs = 7000;
 constexpr uint32_t kMaximumAlbumCoverWaitMs = 35000;
 constexpr uint32_t kJobBusyLogMs = 7000;
+constexpr uint32_t kArtworkTaskStackBytes = 16 * 1024;
 constexpr size_t kMinimumLogoNetworkBuffer = 192 * 1024;
 constexpr size_t kMinimumConfiguredLogoBuffer = 128 * 1024;
 constexpr size_t kMinimumAlbumCoverBuffer = 48 * 1024;
@@ -1027,8 +1028,50 @@ void LogoManager::setEmbeddedImage(
                 static_cast<unsigned>(total));
 }
 
+void LogoManager::setAlbumCoversEnabled(bool enabled) {
+  if (albumCoversEnabled_ == enabled) return;
+  albumCoversEnabled_ = enabled;
+  if (albumCoversEnabled_) return;
+
+  const String previousAlbumKey = albumKey_;
+  if (selectedSource_ == previousAlbumKey) {
+    selectedSource_ = "";
+  }
+  albumTitle_ = "";
+  albumKey_ = "";
+  albumRequestedAt_ = 0;
+  albumStatusLoggedAt_ = 0;
+  if (!previousAlbumKey.isEmpty()) {
+    if (task_)
+      pendingAlbumPurgeKey_ = previousAlbumKey;
+    else
+      purgeCachedArtwork(previousAlbumKey);
+  }
+  refreshSelection();
+  Serial.println("[cover] album borito kereses kikapcsolva");
+}
+
+bool LogoManager::albumCoversEnabled() const { return albumCoversEnabled_; }
+
 void LogoManager::setAlbumTitle(const String& combinedTitle) {
 #if defined(USE_LASTFM_COVER) && defined(LASTFM_API_KEY)
+  if (!albumCoversEnabled_) {
+    if (!albumKey_.isEmpty()) {
+      const String previousAlbumKey = albumKey_;
+      if (selectedSource_ == previousAlbumKey) selectedSource_ = "";
+      albumTitle_ = "";
+      albumKey_ = "";
+      albumRequestedAt_ = 0;
+      albumStatusLoggedAt_ = 0;
+      if (task_)
+        pendingAlbumPurgeKey_ = previousAlbumKey;
+      else
+        purgeCachedArtwork(previousAlbumKey);
+      refreshSelection();
+    }
+    return;
+  }
+
   String artist;
   String title;
   if (!splitCombinedTitle(combinedTitle, artist, title)) {
@@ -1127,6 +1170,7 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
       !playbackRunning || bufferFilledBytes >= albumBufferTarget;
 
   auto tryAlbumCoverJob = [&]() -> bool {
+    if (!albumCoversEnabled_) return false;
     if (albumKey_.isEmpty() || sourceFailed(albumKey_)) return false;
     String cachedAlbum;
     if (findCachedThumbnail(albumKey_, cachedAlbum)) {
@@ -1286,7 +1330,10 @@ bool LogoManager::enterMaintenance(uint32_t timeoutMs) {
   maintenance_ = true;
   browserPending_ = false;
   const uint32_t startedAt = millis();
-  while (task_ && millis() - startedAt < timeoutMs) delay(10);
+  while (task_ && millis() - startedAt < timeoutMs) {
+    processResult();
+    delay(10);
+  }
   processResult();
   return task_ == nullptr;
 }
@@ -1362,7 +1409,7 @@ void LogoManager::refreshSelection() {
 bool LogoManager::startJob(JobKind kind, const String& source,
                            const String& url, const String& localPath,
                            const std::vector<uint32_t>& segments) {
-  if (task_) return false;
+  if (task_ || resultReady_) return false;
   Job* job = new (std::nothrow) Job();
   if (!job) return false;
   job->owner = this;
@@ -1394,8 +1441,8 @@ bool LogoManager::startJob(JobKind kind, const String& source,
       kindName = "album borito";
       break;
   }
-  if (xTaskCreatePinnedToCore(taskEntry, "logo", 10240, job, 0, &task_, 0) !=
-      pdPASS) {
+  if (xTaskCreatePinnedToCore(taskEntry, "logo", kArtworkTaskStackBytes, job,
+                              0, &task_, 0) != pdPASS) {
     task_ = nullptr;
     delete job;
     return false;
@@ -1463,16 +1510,9 @@ void LogoManager::finishJob(const String& source, const String& path,
     resultSuccess_ = success;
     resultSelectionId_ = selectionId;
     resultReady_ = true;
-    task_ = nullptr;
-    taskStartedAt_ = 0;
-    taskLabel_ = "";
-    taskBusyLogged_ = false;
     xSemaphoreGive(mutex_);
   } else {
-    task_ = nullptr;
-    taskStartedAt_ = 0;
-    taskLabel_ = "";
-    taskBusyLogged_ = false;
+    Serial.println("[logo] feladat eredmeny atadasi hiba");
   }
 }
 
@@ -1489,6 +1529,11 @@ void LogoManager::processResult() {
   resultReady_ = false;
   resultSource_ = "";
   resultPath_ = "";
+  resultSelectionId_ = 0;
+  task_ = nullptr;
+  taskStartedAt_ = 0;
+  taskLabel_ = "";
+  taskBusyLogged_ = false;
   xSemaphoreGive(mutex_);
 
   if (!pendingAlbumPurgeKey_.isEmpty() && pendingAlbumPurgeKey_ != source) {
