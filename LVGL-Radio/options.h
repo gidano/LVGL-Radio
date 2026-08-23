@@ -81,7 +81,7 @@
 
 /* Album cover lookup */
 #define USE_LASTFM_COVER
-#define LASTFM_API_KEY "API Key"    // Szerezz be ingyenes API-key-t és add meg itt / Get an Last.fm API Key
+#define LASTFM_API_KEY "API Key"    // https://www.last.fm/api/authentication Szerezz be ingyenes API-key-t és add meg itt / Get an Last.fm API Key
 
 /* ENCODER 1 */
 #define ENC_BTNR 6 // S2
