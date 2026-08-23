@@ -1,3 +1,10 @@
+# Screenshot / Képernyőképek
+
+<p align="center">
+  <img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio.jpg" width="480">
+  <img src="https://github.com/gidano/LVGL-Radio/blob/main/Photos/LVGL-Radio_2.jpg" width="480">
+</p>
+
 ## ILI9488 / ST7796 kijelző és FT6X36 kapacitív érintés
 
 - Külön FT6X36 touch profil.
