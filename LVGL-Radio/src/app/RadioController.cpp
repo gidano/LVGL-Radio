@@ -165,6 +165,8 @@ bool RadioController::begin() {
   wifiDetailsVisible_ = preferences.getBool("ui_wifi", false);
   volumeGraphicVisible_ = preferences.getBool("ui_vol", true);
   diagnosticsVisible_ = preferences.getBool("ui_diag", false);
+  albumCoversEnabled_ = preferences.getBool("cover_on", true);
+  logoManager_.setAlbumCoversEnabled(albumCoversEnabled_);
   if (backgroundPath_.isEmpty()) {
     backgroundPath_ = "/backgrounds/music_background.sr565";
   }
@@ -585,6 +587,20 @@ void RadioController::setDiagnosticsVisible(bool visible) {
   preferences.begin("lvgl-radio", false);
   preferences.putBool("ui_diag", diagnosticsVisible_);
   preferences.end();
+}
+
+bool RadioController::albumCoversEnabled() const {
+  return albumCoversEnabled_;
+}
+
+void RadioController::setAlbumCoversEnabled(bool enabled) {
+  albumCoversEnabled_ = enabled;
+  logoManager_.setAlbumCoversEnabled(albumCoversEnabled_);
+  Preferences preferences;
+  preferences.begin("lvgl-radio", false);
+  preferences.putBool("cover_on", albumCoversEnabled_);
+  preferences.end();
+  refreshDisplay(true);
 }
 
 WeatherConfig RadioController::weatherConfig() const {

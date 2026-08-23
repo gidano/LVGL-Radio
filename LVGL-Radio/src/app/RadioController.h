@@ -76,6 +76,8 @@ class RadioController {
   void setVolumeGraphicVisible(bool visible);
   bool diagnosticsVisible() const;
   void setDiagnosticsVisible(bool visible);
+  bool albumCoversEnabled() const;
+  void setAlbumCoversEnabled(bool enabled);
   WeatherConfig weatherConfig() const;
   WeatherSnapshot weatherSnapshot() const;
   bool setWeatherConfig(const WeatherConfig& config);
@@ -155,6 +157,7 @@ class RadioController {
   bool wifiDetailsVisible_{false};
   bool volumeGraphicVisible_{true};
   bool diagnosticsVisible_{false};
+  bool albumCoversEnabled_{true};
   WeatherService weather_;
   ClockTtsConfig clockTts_;
   String currentPlayUrl_;
