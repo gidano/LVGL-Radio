@@ -11,8 +11,8 @@
     #define ARDUINO_ESP32S3_DEV
 #endif
 
-#define LANGUAGE HU // HU NL PL RU EN EL Enter your own language here!!
-#define NAMEDAYS_FILE HU // HU, PL, NL
+#define LANGUAGE HU // HU Enter your own language here!!
+#define NAMEDAYS_FILE HU // HU
 /*****************************************/
 
 #define DSP_MODEL DSP_ILI9488
