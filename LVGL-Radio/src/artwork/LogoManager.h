@@ -17,6 +17,7 @@ class LogoManager {
   void setIcyLogo(const String& rawLogo, const String& streamUrl);
   void setEmbeddedImage(const String& streamUrl,
                         const std::vector<uint32_t>& segments);
+  void setAlbumTitle(const String& combinedTitle);
   void loop(bool playbackRunning, size_t bufferFilledBytes);
 
   String currentPath() const;
@@ -31,7 +32,8 @@ class LogoManager {
     Embedded,
     Thumbnail,
     BrowserImport,
-    RadioBrowser
+    RadioBrowser,
+    AlbumCover
   };
 
   struct Job {
@@ -68,6 +70,12 @@ class LogoManager {
                                        const String& homepage,
                                        const String& key,
                                        String& imagePath);
+  static bool resolveAlbumCoverUrl(const String& combinedTitle,
+                                   String& coverUrl);
+  static bool downloadAlbumCover(const String& combinedTitle,
+                                 const String& key,
+                                 String& imagePath,
+                                 String& thumbnail);
   static String resolveRelativeUrl(String value, const String& baseUrl);
   static bool downloadAttempt(const String& fetchUrl, const String& key,
                               String& imagePath);
@@ -86,6 +94,7 @@ class LogoManager {
   static String detectImageExtension(const String& path);
   static bool makeThumbnail(const String& imagePath, const String& key,
                             String& thumbnail);
+  static void purgeCachedArtwork(const String& key);
   static void compactCache(const String& imagePath,
                            const String& thumbnailPath);
   static void enforceCacheBudget(const String& keepPath = "");
@@ -102,6 +111,11 @@ class LogoManager {
   String embeddedKey_;
   String embeddedUrl_;
   std::vector<uint32_t> embeddedSegments_;
+  String albumTitle_;
+  String albumKey_;
+  uint32_t albumRequestedAt_{0};
+  uint32_t albumStatusLoggedAt_{0};
+  String pendingAlbumPurgeKey_;
   String selectedSource_;
   String radioBrowserKey_;
   bool radioBrowserLoaded_{false};
@@ -111,6 +125,9 @@ class LogoManager {
   uint32_t selectionId_{0};
   uint32_t searchStartedAt_{0};
   bool searchFinished_{false};
+  uint32_t taskStartedAt_{0};
+  String taskLabel_;
+  bool taskBusyLogged_{false};
 
   bool resultReady_{false};
   bool resultSuccess_{false};

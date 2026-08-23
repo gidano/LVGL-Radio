@@ -9,10 +9,33 @@
 #include <math.h>
 #include <new>
 
+#include "options.h"
+
+void* stbiHeapMalloc(size_t size) {
+  void* memory =
+      heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!memory)
+    memory = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  return memory;
+}
+
+void* stbiHeapRealloc(void* pointer, size_t size) {
+  void* memory =
+      heap_caps_realloc(pointer, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!memory)
+    memory =
+        heap_caps_realloc(pointer, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  return memory;
+}
+
 #define STBI_NO_STDIO
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_PNG
 #define STBI_ONLY_WEBP
+#define STBI_ONLY_BMP
+#define STBI_MALLOC(size) stbiHeapMalloc(size)
+#define STBI_REALLOC(pointer, size) stbiHeapRealloc((pointer), (size))
+#define STBI_FREE(pointer) heap_caps_free(pointer)
 #define STB_IMAGE_IMPLEMENTATION
 #include "third_party/stb_image.h"
 
@@ -20,8 +43,8 @@ namespace {
 
 constexpr size_t kMaximumArtworkBytes = 384 * 1024;
 constexpr size_t kMaximumEmbeddedSegments = 8;
-constexpr size_t kMaximumCacheBytes = 2 * 1024 * 1024;
-constexpr size_t kTargetCacheBytes = 1536 * 1024;
+constexpr size_t kMaximumCacheBytes = 1024 * 1024;
+constexpr size_t kTargetCacheBytes = 768 * 1024;
 constexpr size_t kMinimumArtworkFreeBytes = 96 * 1024;
 constexpr uint16_t kThumbnailSize = 128;
 constexpr uint16_t kMaximumDecodeDimension = 512;
@@ -29,8 +52,14 @@ constexpr size_t kThumbnailBytes =
     8 + static_cast<size_t>(kThumbnailSize) * kThumbnailSize * 2;
 constexpr uint32_t kArtworkDelayMs = 5000;
 constexpr uint32_t kNoLogoSearchWindowMs = 20000;
+constexpr uint32_t kAlbumStatusLogIntervalMs = 7000;
+constexpr uint32_t kMaximumAlbumCoverWaitMs = 35000;
+constexpr uint32_t kJobBusyLogMs = 7000;
 constexpr size_t kMinimumLogoNetworkBuffer = 192 * 1024;
 constexpr size_t kMinimumConfiguredLogoBuffer = 128 * 1024;
+constexpr size_t kMinimumAlbumCoverBuffer = 48 * 1024;
+constexpr size_t kMinimumSecureAlbumCoverBuffer = 128 * 1024;
+constexpr size_t kMinimumAlbumInternalHeap = 32 * 1024;
 constexpr uint32_t kReadIdleTimeoutMs = 3500;
 constexpr char kRadioBrowserBases[][35] = {
     "https://de1.api.radio-browser.info",
@@ -152,7 +181,7 @@ bool readBmpSize(const String& path, ImageSize& size) {
   return true;
 }
 
-bool readImageSize(const String& path, ImageSize& size) {
+[[maybe_unused]] bool readImageSize(const String& path, ImageSize& size) {
   String lower = path;
   lower.toLowerCase();
   if (lower.endsWith(".png")) return readPngSize(path, size);
@@ -214,8 +243,10 @@ bool loadFileBytes(const String& path, std::vector<uint8_t>& bytes) {
   return received == length;
 }
 
-bool decodeStbSprite(const String& imagePath, lgfx::LGFX_Sprite& decoded,
-                     int32_t decodedWidth, int32_t decodedHeight) {
+[[maybe_unused]] bool decodeStbSprite(const String& imagePath,
+                                      lgfx::LGFX_Sprite& decoded,
+                                      int32_t decodedWidth,
+                                      int32_t decodedHeight) {
   std::vector<uint8_t> bytes;
   if (!loadFileBytes(imagePath, bytes)) return false;
 
@@ -291,6 +322,8 @@ String urlEncode(String value) {
 }
 
 bool fetchText(const String& fetchUrl, String& body) {
+  constexpr size_t kMaximumTextResponseBytes = 96 * 1024;
+  constexpr uint32_t kTextReadIdleTimeoutMs = 4500;
   HTTPClient http;
   NetworkClient plainClient;
   NetworkClientSecure secureClient;
@@ -299,18 +332,70 @@ bool fetchText(const String& fetchUrl, String& body) {
     secureClient.setInsecure();
     client = &secureClient;
   }
-  http.setConnectTimeout(1500);
-  http.setTimeout(2500);
+  http.setConnectTimeout(6000);
+  http.setTimeout(8000);
   http.setUserAgent("LVGL-Radio/1.0 ESP32");
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(*client, fetchUrl)) return false;
+  Serial.printf("[cover] HTTP keresés: %s\n", fetchUrl.c_str());
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
+    Serial.printf("[cover] HTTP hiba %d: %s\n", code, fetchUrl.c_str());
     http.end();
     return false;
   }
-  body = http.getString();
+  const int declaredLength = http.getSize();
+  if (declaredLength > 0 &&
+      static_cast<size_t>(declaredLength) > kMaximumTextResponseBytes) {
+    Serial.printf("[cover] tul nagy API valasz: %d byte\n", declaredLength);
+    http.end();
+    return false;
+  }
+
+  body = "";
+  body.reserve(declaredLength > 0 ? min<size_t>(declaredLength, 8192) : 2048);
+  NetworkClient* stream = http.getStreamPtr();
+  uint8_t buffer[512];
+  size_t receivedTotal = 0;
+  uint32_t lastReadAt = millis();
+  while ((http.connected() || stream->available()) &&
+         (declaredLength < 0 ||
+          receivedTotal < static_cast<size_t>(declaredLength))) {
+    const size_t available = stream->available();
+    if (!available) {
+      if (millis() - lastReadAt > kTextReadIdleTimeoutMs) {
+        Serial.println("[cover] API valasz olvasasi timeout");
+        break;
+      }
+      vTaskDelay(1);
+      continue;
+    }
+    size_t requested = min(available, sizeof(buffer));
+    if (declaredLength > 0) {
+      requested =
+          min(requested,
+              static_cast<size_t>(declaredLength) - receivedTotal);
+    }
+    const int received = stream->readBytes(buffer, requested);
+    if (received <= 0) break;
+    if (receivedTotal + static_cast<size_t>(received) >
+        kMaximumTextResponseBytes) {
+      Serial.println("[cover] API valasz limit tulcsordult");
+      body = "";
+      break;
+    }
+    body.concat(reinterpret_cast<const char*>(buffer),
+                static_cast<unsigned int>(received));
+    receivedTotal += static_cast<size_t>(received);
+    lastReadAt = millis();
+    vTaskDelay(1);
+  }
   http.end();
+  if (declaredLength > 0 &&
+      receivedTotal != static_cast<size_t>(declaredLength)) {
+    Serial.printf("[cover] rovid API valasz: %u/%d byte\n",
+                  static_cast<unsigned>(receivedTotal), declaredLength);
+  }
   return !body.isEmpty();
 }
 
@@ -373,6 +458,46 @@ String extractJsonStringField(const String& json, const char* fieldName) {
   }
 }
 
+void collectJsonStringFields(const String& json, const char* fieldName,
+                             std::vector<String>& values,
+                             uint8_t maximum = 8) {
+  const String needle = String("\"") + fieldName + "\"";
+  size_t searchFrom = 0;
+  while (values.size() < maximum) {
+    const int index = json.indexOf(needle, searchFrom);
+    if (index < 0) return;
+    const String value = extractJsonStringField(json.substring(index),
+                                                fieldName);
+    if (!value.isEmpty()) {
+      bool duplicate = false;
+      for (const String& existing : values) {
+        if (existing == value) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) values.push_back(value);
+    }
+    searchFrom = static_cast<size_t>(index) + needle.length();
+  }
+}
+
+void appendUnique(std::vector<String>& values, const String& candidate) {
+  if (candidate.isEmpty()) return;
+  for (const String& existing : values) {
+    if (existing == candidate) return;
+  }
+  values.push_back(candidate);
+}
+
+String upgradedItunesArtwork(String url) {
+  url.trim();
+  if (url.isEmpty()) return "";
+  url.replace("100x100", "600x600");
+  url.replace("60x60", "600x600");
+  return url;
+}
+
 String radioBrowserFaviconForStream(const String& streamUrl) {
   const std::vector<String> endpoints = {
       streamUrl,
@@ -391,6 +516,260 @@ String radioBrowserFaviconForStream(const String& streamUrl) {
   }
 
   return "";
+}
+
+bool isValidMbid(const String& value) {
+  if (value.length() != 36) return false;
+  for (size_t index = 0; index < 36; ++index) {
+    const bool separator =
+        index == 8 || index == 13 || index == 18 || index == 23;
+    const char ch = value[index];
+    if (separator) {
+      if (ch != '-') return false;
+    } else if (!isxdigit(static_cast<unsigned char>(ch))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+String normalizedCoverPart(String value) {
+  value.trim();
+  value.toLowerCase();
+  String normalized;
+  normalized.reserve(value.length());
+  bool pendingSpace = false;
+  for (size_t index = 0; index < value.length(); ++index) {
+    const char ch = value[index];
+    if (isspace(static_cast<unsigned char>(ch))) {
+      pendingSpace = normalized.length() > 0;
+      continue;
+    }
+    if (pendingSpace) normalized += ' ';
+    pendingSpace = false;
+    normalized += ch;
+  }
+  return normalized;
+}
+
+bool splitCombinedTitle(const String& combined, String& artist, String& title) {
+  const int separator = combined.indexOf(" - ");
+  if (separator <= 0) return false;
+  artist = combined.substring(0, separator);
+  title = combined.substring(separator + 3);
+  artist.trim();
+  title.trim();
+  String normalizedArtist = artist;
+  normalizedArtist.replace(" ", "");
+  normalizedArtist.toLowerCase();
+  if (normalizedArtist == "acdc") artist = "AC/DC";
+  if (artist.isEmpty() || title.isEmpty()) return false;
+
+  const char* blocked[] = {
+      "unknown", "not provided", "n/a", "untitled", "no title"};
+  String lowerTitle = title;
+  lowerTitle.toLowerCase();
+  for (const char* value : blocked) {
+    if (lowerTitle == value) return false;
+  }
+  return true;
+}
+
+String albumCoverKey(const String& artist, const String& title) {
+  return "album:" + normalizedCoverPart(artist) + "\x1f" +
+         normalizedCoverPart(title);
+}
+
+String extractFieldAfter(const String& json, const String& marker,
+                         const char* fieldName) {
+  const int markerAt = marker.isEmpty() ? 0 : json.indexOf(marker);
+  if (markerAt < 0) return "";
+  return extractJsonStringField(json.substring(markerAt), fieldName);
+}
+
+bool extractFirstReleaseGroupMbid(const String& json, String& mbid,
+                                  size_t startAt) {
+  size_t cursor = startAt;
+  while (cursor < json.length()) {
+    const int rgAt = json.indexOf("\"release-group\"", cursor);
+    if (rgAt < 0) return false;
+    const String candidate = extractFieldAfter(json.substring(rgAt), "", "id");
+    if (isValidMbid(candidate)) {
+      mbid = candidate;
+      return true;
+    }
+    cursor = static_cast<size_t>(rgAt) + 15;
+  }
+  return false;
+}
+
+bool findMusicBrainzReleaseGroupCovers(const String& artist,
+                                       const String& title,
+                                       std::vector<String>& coverUrls) {
+  coverUrls.clear();
+  static uint32_t lastMusicBrainzAt = 0;
+  const uint32_t now = millis();
+  if (lastMusicBrainzAt && now - lastMusicBrainzAt < 1100) {
+    vTaskDelay(pdMS_TO_TICKS(1100 - (now - lastMusicBrainzAt)));
+  }
+  lastMusicBrainzAt = millis();
+
+  String query = "recording:\"";
+  query += title;
+  query += "\" AND artist:\"";
+  query += artist;
+  query += "\"";
+
+  String json;
+  String url =
+      "http://musicbrainz.org/ws/2/recording/?fmt=json&limit=5&query=" +
+      urlEncode(query);
+  if (!fetchText(url, json)) {
+    Serial.println("[cover] MusicBrainz keresés HTTP hiba");
+    return false;
+  }
+
+  size_t cursor = 0;
+  for (uint8_t attempts = 0; attempts < 6; ++attempts) {
+    String mbid;
+    if (!extractFirstReleaseGroupMbid(json, mbid, cursor)) break;
+    cursor = static_cast<size_t>(json.indexOf(mbid)) + mbid.length();
+    bool duplicate = false;
+    for (const String& coverUrl : coverUrls) {
+      if (coverUrl.indexOf(mbid) >= 0) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) {
+      coverUrls.push_back("http://coverartarchive.org/release-group/" + mbid +
+                          "/front-250");
+    }
+  }
+  if (coverUrls.empty()) {
+    Serial.println("[cover] MusicBrainz nem adott release-group jeloltet");
+  }
+  return !coverUrls.empty();
+}
+
+bool findLastFmReleaseCover(const String& artist, const String& title,
+                            String& coverUrl) {
+#if defined(USE_LASTFM_COVER) && defined(LASTFM_API_KEY)
+  String url =
+      "http://ws.audioscrobbler.com/2.0/?method=track.getInfo&autocorrect=1&format=json&api_key=";
+  url += LASTFM_API_KEY;
+  url += "&artist=";
+  url += urlEncode(artist);
+  url += "&track=";
+  url += urlEncode(title);
+
+  String json;
+  if (!fetchText(url, json)) return false;
+  const String albumJson = json.substring(max(0, json.indexOf("\"album\"")));
+  const String mbid = extractJsonStringField(albumJson, "mbid");
+  if (!isValidMbid(mbid)) return false;
+  coverUrl = "http://coverartarchive.org/release/" + mbid + "/front-250";
+  return true;
+#else
+  (void)artist;
+  (void)title;
+  (void)coverUrl;
+  return false;
+#endif
+}
+
+bool findLastFmCoverCandidates(const String& artist, const String& title,
+                               std::vector<String>& coverUrls) {
+#if defined(USE_LASTFM_COVER) && defined(LASTFM_API_KEY)
+  String url =
+      "http://ws.audioscrobbler.com/2.0/?method=track.getInfo&autocorrect=1&format=json&api_key=";
+  url += LASTFM_API_KEY;
+  url += "&artist=";
+  url += urlEncode(artist);
+  url += "&track=";
+  url += urlEncode(title);
+
+  String json;
+  if (!fetchText(url, json)) {
+    Serial.println("[cover] Last.fm HTTP hiba");
+    return false;
+  }
+
+  std::vector<String> images;
+  collectJsonStringFields(json, "#text", images, 10);
+  for (int index = static_cast<int>(images.size()) - 1; index >= 0; --index) {
+    if (images[index].startsWith("http://") ||
+        images[index].startsWith("https://")) {
+      appendUnique(coverUrls, images[index]);
+      break;
+    }
+  }
+
+  const String albumJson = json.substring(max(0, json.indexOf("\"album\"")));
+  const String mbid = extractJsonStringField(albumJson, "mbid");
+  if (isValidMbid(mbid)) {
+    appendUnique(coverUrls,
+                 "http://coverartarchive.org/release/" + mbid + "/front-250");
+    appendUnique(coverUrls,
+                 "http://coverartarchive.org/release/" + mbid + "/front");
+  }
+
+  Serial.printf("[cover] Last.fm jeloltek: %u\n",
+                static_cast<unsigned>(coverUrls.size()));
+  return !coverUrls.empty();
+#else
+  (void)artist;
+  (void)title;
+  (void)coverUrls;
+  return false;
+#endif
+}
+
+bool findItunesCoverCandidates(const String& artist, const String& title,
+                               std::vector<String>& coverUrls) {
+  const String query = artist + " " + title;
+  const String url =
+      "https://itunes.apple.com/search?media=music&entity=song&limit=5&term=" +
+      urlEncode(query);
+  String json;
+  if (!fetchText(url, json)) {
+    Serial.println("[cover] iTunes HTTP hiba");
+    return false;
+  }
+  std::vector<String> images;
+  collectJsonStringFields(json, "artworkUrl100", images, 8);
+  const size_t before = coverUrls.size();
+  for (const String& image : images) {
+    appendUnique(coverUrls, upgradedItunesArtwork(image));
+  }
+  Serial.printf("[cover] iTunes jeloltek: %u\n",
+                static_cast<unsigned>(coverUrls.size() - before));
+  return coverUrls.size() > before;
+}
+
+bool findDeezerCoverCandidates(const String& artist, const String& title,
+                               std::vector<String>& coverUrls) {
+  String query = "artist:\"";
+  query += artist;
+  query += "\" track:\"";
+  query += title;
+  query += "\"";
+  const String url =
+      "https://api.deezer.com/search/track?limit=5&q=" + urlEncode(query);
+  String json;
+  if (!fetchText(url, json)) {
+    Serial.println("[cover] Deezer HTTP hiba");
+    return false;
+  }
+  const size_t before = coverUrls.size();
+  std::vector<String> images;
+  collectJsonStringFields(json, "cover_xl", images, 8);
+  collectJsonStringFields(json, "cover_big", images, 8);
+  collectJsonStringFields(json, "cover_medium", images, 8);
+  for (const String& image : images) appendUnique(coverUrls, image);
+  Serial.printf("[cover] Deezer jeloltek: %u\n",
+                static_cast<unsigned>(coverUrls.size() - before));
+  return coverUrls.size() > before;
 }
 
 bool copyFileRange(const String& sourcePath, size_t offset, size_t length,
@@ -474,6 +853,92 @@ bool LogoManager::downloadRadioBrowserLogo(const String& streamUrl,
   return downloadRemote(resolved, key, imagePath);
 }
 
+bool LogoManager::resolveAlbumCoverUrl(const String& combinedTitle,
+                                       String& coverUrl) {
+  coverUrl = "";
+  String artist;
+  String title;
+  if (!splitCombinedTitle(combinedTitle, artist, title)) return false;
+
+  if (findLastFmReleaseCover(artist, title, coverUrl)) {
+    Serial.printf("[cover] Last.fm release MBID: %s - %s\n",
+                  artist.c_str(), title.c_str());
+    return true;
+  }
+  std::vector<String> coverUrls;
+  if (findMusicBrainzReleaseGroupCovers(artist, title, coverUrls) &&
+      !coverUrls.empty()) {
+    coverUrl = coverUrls.front();
+    Serial.printf("[cover] MusicBrainz release-group: %s - %s\n",
+                  artist.c_str(), title.c_str());
+    return true;
+  }
+  return false;
+}
+
+bool LogoManager::downloadAlbumCover(const String& combinedTitle,
+                                     const String& key,
+                                     String& imagePath,
+                                     String& thumbnail) {
+  String artist;
+  String title;
+  if (!splitCombinedTitle(combinedTitle, artist, title)) return false;
+
+  auto tryCover = [&](const String& coverUrl) {
+    if (coverUrl.isEmpty()) return false;
+    Serial.printf("[cover] jelolt proba: %s\n", coverUrl.c_str());
+    const bool success = downloadRemote(coverUrl, key, imagePath) &&
+                         makeThumbnail(imagePath, key, thumbnail);
+    Serial.printf("[cover] jelolt %s\n", success ? "OK" : "nem jo");
+    return success;
+  };
+
+  std::vector<String> coverUrls;
+
+  Serial.printf("[cover] 1/5 Last.fm: %s - %s\n", artist.c_str(),
+                title.c_str());
+  if (findLastFmCoverCandidates(artist, title, coverUrls)) {
+    for (const String& candidateUrl : coverUrls) {
+      if (tryCover(candidateUrl)) return true;
+    }
+  }
+
+  Serial.println("[cover] 2/5 MusicBrainz + Cover Art Archive");
+  coverUrls.clear();
+  if (findMusicBrainzReleaseGroupCovers(artist, title, coverUrls)) {
+    std::vector<String> expanded = coverUrls;
+    for (const String& candidateUrl : coverUrls) {
+      appendUnique(expanded,
+                   candidateUrl.endsWith("/front-250")
+                       ? candidateUrl.substring(0, candidateUrl.length() - 4)
+                       : candidateUrl);
+    }
+    coverUrls = expanded;
+    for (const String& candidateUrl : coverUrls) {
+      if (tryCover(candidateUrl)) return true;
+    }
+  }
+
+  Serial.println("[cover] 3/5 iTunes Search");
+  coverUrls.clear();
+  if (findItunesCoverCandidates(artist, title, coverUrls)) {
+    for (const String& candidateUrl : coverUrls) {
+      if (tryCover(candidateUrl)) return true;
+    }
+  }
+
+  Serial.println("[cover] 4/5 Deezer Search");
+  coverUrls.clear();
+  if (findDeezerCoverCandidates(artist, title, coverUrls)) {
+    for (const String& candidateUrl : coverUrls) {
+      if (tryCover(candidateUrl)) return true;
+    }
+  }
+
+  Serial.println("[cover] 5/5 nincs tobb jelolt");
+  return false;
+}
+
 void LogoManager::begin() {
   if (!LittleFS.exists("/cache")) LittleFS.mkdir("/cache");
   mutex_ = xSemaphoreCreateMutex();
@@ -500,6 +965,11 @@ void LogoManager::selectStation(const String& configuredSource,
   embeddedKey_ = "";
   embeddedUrl_ = "";
   embeddedSegments_.clear();
+  albumTitle_ = "";
+  albumKey_ = "";
+  albumRequestedAt_ = 0;
+  albumStatusLoggedAt_ = 0;
+  pendingAlbumPurgeKey_ = "";
   radioBrowserLoaded_ = false;
   radioBrowserKey_ = stationName_;
   if (radioBrowserKey_.isEmpty()) radioBrowserKey_ = stationSource_;
@@ -557,11 +1027,70 @@ void LogoManager::setEmbeddedImage(
                 static_cast<unsigned>(total));
 }
 
+void LogoManager::setAlbumTitle(const String& combinedTitle) {
+#if defined(USE_LASTFM_COVER) && defined(LASTFM_API_KEY)
+  String artist;
+  String title;
+  if (!splitCombinedTitle(combinedTitle, artist, title)) {
+    if (!albumKey_.isEmpty()) {
+      const String previousAlbumKey = albumKey_;
+      albumTitle_ = "";
+      albumKey_ = "";
+      albumRequestedAt_ = 0;
+      albumStatusLoggedAt_ = 0;
+      if (task_ && previousAlbumKey.startsWith("album:"))
+        pendingAlbumPurgeKey_ = previousAlbumKey;
+      else
+        purgeCachedArtwork(previousAlbumKey);
+      refreshSelection();
+    }
+    return;
+  }
+
+  const String key = albumCoverKey(artist, title);
+  if (key == albumKey_) return;
+  const String previousAlbumKey = albumKey_;
+  if (selectedSource_ == previousAlbumKey) {
+    selectedSource_ = "";
+  }
+  if (!previousAlbumKey.isEmpty()) {
+    if (task_)
+      pendingAlbumPurgeKey_ = previousAlbumKey;
+    else
+      purgeCachedArtwork(previousAlbumKey);
+  }
+  albumTitle_ = artist + " - " + title;
+  albumKey_ = key;
+  albumRequestedAt_ = millis();
+  albumStatusLoggedAt_ = 0;
+  if (selectedSource_.isEmpty()) refreshSelection();
+  Serial.printf("[cover] uj cim: %s\n", albumTitle_.c_str());
+#else
+  (void)combinedTitle;
+#endif
+}
+
 void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
   processResult();
 
+  if (currentPath_.isEmpty() || !LittleFS.exists(currentPath_)) {
+    String noLogoThumbnail;
+    currentPath_ = findCachedThumbnail("nologo", noLogoThumbnail)
+                       ? noLogoThumbnail
+                       : String("/logos/nologo.png");
+  }
+
   if (maintenance_) return;
-  if (task_) return;
+  if (task_) {
+    if (!taskBusyLogged_ && taskStartedAt_ &&
+        millis() - taskStartedAt_ >= kJobBusyLogMs) {
+      Serial.printf("[logo] varakozas: %s meg fut (%u ms)\n",
+                    taskLabel_.c_str(),
+                    static_cast<unsigned>(millis() - taskStartedAt_));
+      taskBusyLogged_ = true;
+    }
+    return;
+  }
   if (browserPending_) {
     const String source = browserSource_;
     const String path = browserTemporaryPath_;
@@ -581,15 +1110,94 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
     }
   }
 
-  // A valid local assignment remains authoritative for the whole station
-  // lifetime. Cached artwork and later stream metadata must not replace it.
+  const bool configuredStationSource =
+      stationSource_ != "nologo" && !stationSource_.isEmpty();
+  const bool selectedConfiguredSource =
+      configuredStationSource && selectedSource_ == stationSource_;
+  const bool safeForNetwork =
+      !playbackRunning ||
+      bufferFilledBytes >= (configuredStationSource
+                                ? kMinimumConfiguredLogoBuffer
+                                : kMinimumLogoNetworkBuffer);
+  const bool secureAudioStream = streamUrl_.startsWith("https://");
+  const size_t albumBufferTarget =
+      secureAudioStream ? kMinimumSecureAlbumCoverBuffer
+                        : kMinimumAlbumCoverBuffer;
+  const bool safeForAlbumCover =
+      !playbackRunning || bufferFilledBytes >= albumBufferTarget;
+
+  auto tryAlbumCoverJob = [&]() -> bool {
+    if (albumKey_.isEmpty() || sourceFailed(albumKey_)) return false;
+    String cachedAlbum;
+    if (findCachedThumbnail(albumKey_, cachedAlbum)) {
+      selectedSource_ = albumKey_;
+      currentPath_ = cachedAlbum;
+      searchFinished_ = true;
+      return true;
+    }
+
+    const uint32_t now = millis();
+    if (now - albumRequestedAt_ < kArtworkDelayMs) {
+      if (!albumStatusLoggedAt_ ||
+          now - albumStatusLoggedAt_ >= kAlbumStatusLogIntervalMs) {
+        Serial.printf("[cover] varakozas indulashoz: %s\n",
+                      albumTitle_.c_str());
+        albumStatusLoggedAt_ = now;
+      }
+      return false;
+    } else if (!safeForAlbumCover) {
+      if (now - albumRequestedAt_ >= kMaximumAlbumCoverWaitMs) {
+        Serial.printf("[cover] kihagyva: nincs eleg puffer %u/%u byte: %s\n",
+                      static_cast<unsigned>(bufferFilledBytes),
+                      static_cast<unsigned>(albumBufferTarget),
+                      albumTitle_.c_str());
+        markSourceFailed(albumKey_);
+        return false;
+      }
+      if (!albumStatusLoggedAt_ ||
+          now - albumStatusLoggedAt_ >= kAlbumStatusLogIntervalMs) {
+        Serial.printf("[cover] varakozas pufferre: %u/%u byte\n",
+                      static_cast<unsigned>(bufferFilledBytes),
+                      static_cast<unsigned>(albumBufferTarget));
+        albumStatusLoggedAt_ = now;
+      }
+      return false;
+    } else if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL |
+                                       MALLOC_CAP_8BIT) <
+               kMinimumAlbumInternalHeap) {
+      if (now - albumRequestedAt_ >= kMaximumAlbumCoverWaitMs) {
+        Serial.printf("[cover] kihagyva: keves belso heap %u/%u byte: %s\n",
+                      static_cast<unsigned>(heap_caps_get_free_size(
+                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                      static_cast<unsigned>(kMinimumAlbumInternalHeap),
+                      albumTitle_.c_str());
+        markSourceFailed(albumKey_);
+        return false;
+      }
+      if (!albumStatusLoggedAt_ ||
+          now - albumStatusLoggedAt_ >= kAlbumStatusLogIntervalMs) {
+        Serial.printf("[cover] varakozas belso heapre: %u/%u byte\n",
+                      static_cast<unsigned>(heap_caps_get_free_size(
+                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                      static_cast<unsigned>(kMinimumAlbumInternalHeap));
+        albumStatusLoggedAt_ = now;
+      }
+      return false;
+    } else {
+      return startJob(JobKind::AlbumCover, albumKey_, albumTitle_);
+    }
+  };
+
+  // A valid local assignment is an immediately drawable station-logo base.
   const String configuredLocal = localLogoPath(stationSource_);
-  if (stationSource_ != "nologo" && !configuredLocal.isEmpty() &&
+  if (selectedSource_ != albumKey_ && stationSource_ != "nologo" &&
+      !configuredLocal.isEmpty() &&
       LittleFS.exists(configuredLocal)) {
     selectedSource_ = stationSource_;
     String configuredThumbnail;
     if (findCachedThumbnail(stationSource_, configuredThumbnail)) {
       currentPath_ = configuredThumbnail;
+      if (tryAlbumCoverJob()) return;
       return;
     }
     if (currentPath_ != configuredLocal) currentPath_ = configuredLocal;
@@ -602,22 +1210,15 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
         millis() - selectedAt_ < kArtworkDelayMs) &&
       findCachedThumbnail(selectedSource_, cached)) {
     if (currentPath_ != cached) currentPath_ = cached;
+    if (selectedSource_ != albumKey_ && tryAlbumCoverJob()) return;
     return;
   }
-
-  const bool selectedConfiguredSource =
-      stationSource_ != "nologo" && !stationSource_.isEmpty() &&
-      selectedSource_ == stationSource_;
-  const bool safeForNetwork =
-      !playbackRunning ||
-      bufferFilledBytes >= (selectedConfiguredSource
-                                ? kMinimumConfiguredLogoBuffer
-                                : kMinimumLogoNetworkBuffer);
 
   if (!selectedConfiguredSource &&
       (searchFinished_ ||
        millis() - searchStartedAt_ >= kNoLogoSearchWindowMs)) {
     searchFinished_ = true;
+    if (tryAlbumCoverJob()) return;
     return;
   }
 
@@ -691,8 +1292,8 @@ bool LogoManager::enterMaintenance(uint32_t timeoutMs) {
 }
 
 void LogoManager::refreshSelection() {
-  // A valid statically assigned local logo is authoritative. Do not replace
-  // it with album art, ICY art, or a web search result.
+  // A valid local logo is the fastest station-logo base. If it is not present,
+  // the normal stream/RadioBrowser lookup chain continues below.
   const String configuredLocal = localLogoPath(stationSource_);
   if (stationSource_ != "nologo" && !configuredLocal.isEmpty() &&
       LittleFS.exists(configuredLocal)) {
@@ -772,12 +1373,37 @@ bool LogoManager::startJob(JobKind kind, const String& source,
   job->selectionId = selectionId_;
   job->homepage = homepage_;
   job->segments = segments;
+  const char* kindName = "kepfeladat";
+  switch (kind) {
+    case JobKind::Remote:
+      kindName = "tavoli logo";
+      break;
+    case JobKind::Embedded:
+      kindName = "beagyazott kep";
+      break;
+    case JobKind::Thumbnail:
+      kindName = "thumbnail";
+      break;
+    case JobKind::BrowserImport:
+      kindName = "bongeszo import";
+      break;
+    case JobKind::RadioBrowser:
+      kindName = "radio-browser";
+      break;
+    case JobKind::AlbumCover:
+      kindName = "album borito";
+      break;
+  }
   if (xTaskCreatePinnedToCore(taskEntry, "logo", 10240, job, 0, &task_, 0) !=
       pdPASS) {
     task_ = nullptr;
     delete job;
     return false;
   }
+  taskStartedAt_ = millis();
+  taskLabel_ = String(kindName) + ": " + (kind == JobKind::AlbumCover ? url : source);
+  taskBusyLogged_ = false;
+  Serial.printf("[logo] feladat indul: %s\n", taskLabel_.c_str());
   return true;
 }
 
@@ -819,6 +1445,11 @@ void LogoManager::executeJob(Job& job) {
                 makeThumbnail(imagePath, job.source, thumbnail);
       if (success) compactCache(imagePath, thumbnail);
       break;
+    case JobKind::AlbumCover: {
+      success = downloadAlbumCover(job.url, job.source, imagePath, thumbnail);
+      if (success) compactCache(imagePath, thumbnail);
+      break;
+    }
   }
   finishJob(job.source, success ? thumbnail : String(), success,
             job.selectionId);
@@ -833,9 +1464,15 @@ void LogoManager::finishJob(const String& source, const String& path,
     resultSelectionId_ = selectionId;
     resultReady_ = true;
     task_ = nullptr;
+    taskStartedAt_ = 0;
+    taskLabel_ = "";
+    taskBusyLogged_ = false;
     xSemaphoreGive(mutex_);
   } else {
     task_ = nullptr;
+    taskStartedAt_ = 0;
+    taskLabel_ = "";
+    taskBusyLogged_ = false;
   }
 }
 
@@ -854,11 +1491,23 @@ void LogoManager::processResult() {
   resultPath_ = "";
   xSemaphoreGive(mutex_);
 
-  if (resultSelectionId != selectionId_) return;
+  if (!pendingAlbumPurgeKey_.isEmpty() && pendingAlbumPurgeKey_ != source) {
+    purgeCachedArtwork(pendingAlbumPurgeKey_);
+    pendingAlbumPurgeKey_ = "";
+  }
+
+  if (resultSelectionId != selectionId_) {
+    if (!pendingAlbumPurgeKey_.isEmpty()) {
+      purgeCachedArtwork(pendingAlbumPurgeKey_);
+      pendingAlbumPurgeKey_ = "";
+    }
+    return;
+  }
   const bool resultConfiguredSource =
       stationSource_ != "nologo" && !stationSource_.isEmpty() &&
       source == stationSource_;
-  if (!resultConfiguredSource &&
+  const bool resultAlbumCover = source.startsWith("album:");
+  if (!resultAlbumCover && !resultConfiguredSource &&
       millis() - searchStartedAt_ >= kNoLogoSearchWindowMs) {
     searchFinished_ = true;
     return;
@@ -879,7 +1528,10 @@ void LogoManager::processResult() {
     }
     if (source == radioBrowserKey_) radioBrowserLoaded_ = true;
   } else {
-    Serial.printf("[logo] sikertelen: %s\n", source.c_str());
+    const String failedLabel = resultAlbumCover && !albumTitle_.isEmpty()
+                                   ? albumTitle_
+                                   : source;
+    Serial.printf("[logo] sikertelen: %s\n", failedLabel.c_str());
     markSourceFailed(source);
     const bool keepConfiguredRemoteForBrowser =
         resultConfiguredSource && isRemote(source);
@@ -892,6 +1544,11 @@ void LogoManager::processResult() {
     } else if (source == selectedSource_) {
       refreshSelection();
     }
+  }
+
+  if (!pendingAlbumPurgeKey_.isEmpty()) {
+    purgeCachedArtwork(pendingAlbumPurgeKey_);
+    pendingAlbumPurgeKey_ = "";
   }
 }
 
@@ -1060,8 +1717,7 @@ bool LogoManager::downloadAttempt(const String& fetchUrl, const String& key,
   http.setConnectTimeout(4000);
   http.setTimeout(6000);
   http.setUserAgent("LVGL-Radio/1.0 ESP32");
-  http.addHeader("Accept",
-                 "image/jpeg,image/png,image/webp,image/bmp,*/*;q=0.8");
+  http.addHeader("Accept", "image/jpeg,image/png,image/bmp,*/*;q=0.5");
   http.addHeader("Referer", "https://www.radio.pl/");
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(*client, fetchUrl)) return false;
@@ -1383,88 +2039,80 @@ bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
                                 String& thumbnail) {
   thumbnail = thumbnailPath(key);
   if (validThumbnail(thumbnail)) return true;
-  ImageSize size;
-  if (!readImageSize(imagePath, size)) {
-    Serial.printf("[logo] kepmeret olvasasi hiba: %s\n", imagePath.c_str());
+
+  std::vector<uint8_t> bytes;
+  if (!loadFileBytes(imagePath, bytes)) return false;
+  int sourceWidth = 0;
+  int sourceHeight = 0;
+  int channels = 0;
+  stbi_uc* rgba = stbi_load_from_memory(bytes.data(),
+                                        static_cast<int>(bytes.size()),
+                                        &sourceWidth, &sourceHeight,
+                                        &channels, 4);
+  if (!rgba || sourceWidth <= 0 || sourceHeight <= 0) {
+    if (rgba) stbi_image_free(rgba);
+    Serial.printf("[logo] kepdekodolas sikertelen: %s (%s)\n",
+                  imagePath.c_str(),
+                  stbi_failure_reason() ? stbi_failure_reason() : "?");
     return false;
   }
 
-  lgfx::LGFX_Sprite sprite;
-  sprite.setPsram(true);
-  sprite.setColorDepth(16);
-  if (!sprite.createSprite(kThumbnailSize, kThumbnailSize)) return false;
-  sprite.fillSprite(0x0000);
-
-  const uint16_t largestDimension = max(size.width, size.height);
-  const float decodeScale =
-      largestDimension > kMaximumDecodeDimension
-          ? static_cast<float>(kMaximumDecodeDimension) / largestDimension
-          : 1.0f;
-  const int32_t decodedWidth =
-      max<int32_t>(1, lroundf(size.width * decodeScale));
-  const int32_t decodedHeight =
-      max<int32_t>(1, lroundf(size.height * decodeScale));
-  lgfx::LGFX_Sprite decoded;
-  decoded.setPsram(true);
-  decoded.setColorDepth(16);
-  if (!decoded.createSprite(decodedWidth, decodedHeight)) {
-    sprite.deleteSprite();
+  const size_t pixelBytes =
+      static_cast<size_t>(kThumbnailSize) * kThumbnailSize * 2;
+  uint8_t* pixels = static_cast<uint8_t*>(
+      heap_caps_malloc(pixelBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!pixels) pixels = static_cast<uint8_t*>(malloc(pixelBytes));
+  if (!pixels) {
+    stbi_image_free(rgba);
     return false;
   }
-  decoded.fillSprite(0x0000);
+  memset(pixels, 0, pixelBytes);
 
-  String lower = imagePath;
-  lower.toLowerCase();
-  bool drawn = false;
-  if (lower.endsWith(".png")) {
-    drawn = decoded.drawPngFile(
-        LittleFS, imagePath.c_str(), 0, 0, decodedWidth, decodedHeight, 0, 0,
-        decodeScale, decodeScale, top_left);
-    decoded.releasePngMemory();
-  } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-    drawn = decoded.drawJpgFile(
-        LittleFS, imagePath.c_str(), 0, 0, decodedWidth, decodedHeight, 0, 0,
-        decodeScale, decodeScale, top_left);
-  } else if (lower.endsWith(".bmp")) {
-    drawn = decoded.drawBmpFile(
-        LittleFS, imagePath.c_str(), 0, 0, decodedWidth, decodedHeight, 0, 0,
-        decodeScale, decodeScale, top_left);
-  } else if (lower.endsWith(".webp")) {
-    drawn = decodeStbSprite(imagePath, decoded, decodedWidth, decodedHeight);
-  }
-  if (!drawn && (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
-                 lower.endsWith(".png") || lower.endsWith(".bmp"))) {
-    Serial.printf("[logo] stb tartalek dekoder: %s\n", imagePath.c_str());
-    drawn = decodeStbSprite(imagePath, decoded, decodedWidth, decodedHeight);
-  }
-  if (!drawn) {
-    Serial.printf("[logo] kepdekodolas sikertelen: %s\n", imagePath.c_str());
-    decoded.deleteSprite();
-    sprite.deleteSprite();
-    return false;
-  }
+  const float scale =
+      min(static_cast<float>(kThumbnailSize) / sourceWidth,
+          static_cast<float>(kThumbnailSize) / sourceHeight);
+  const int targetWidth = max<int>(1, lroundf(sourceWidth * scale));
+  const int targetHeight = max<int>(1, lroundf(sourceHeight * scale));
+  const int offsetX = (kThumbnailSize - targetWidth) / 2;
+  const int offsetY = (kThumbnailSize - targetHeight) / 2;
 
-  const float finalScale =
-      min(static_cast<float>(kThumbnailSize) / decodedWidth,
-          static_cast<float>(kThumbnailSize) / decodedHeight);
-  const int32_t finalWidth =
-      max<int32_t>(1, lroundf(decodedWidth * finalScale));
-  const int32_t finalHeight =
-      max<int32_t>(1, lroundf(decodedHeight * finalScale));
-  if (finalWidth == decodedWidth && finalHeight == decodedHeight) {
-    decoded.pushSprite(&sprite, (kThumbnailSize - finalWidth) / 2,
-                       (kThumbnailSize - finalHeight) / 2);
-  } else {
-    decoded.setPivot(decodedWidth / 2, decodedHeight / 2);
-    decoded.pushRotateZoomWithAA(&sprite, kThumbnailSize / 2.0f,
-                                 kThumbnailSize / 2.0f, 0.0f, finalScale,
-                                 finalScale);
+  for (int y = 0; y < targetHeight; ++y) {
+    const int srcY = min(sourceHeight - 1,
+                         static_cast<int>((static_cast<int64_t>(y) *
+                                           sourceHeight) /
+                                          targetHeight));
+    for (int x = 0; x < targetWidth; ++x) {
+      const int srcX = min(sourceWidth - 1,
+                           static_cast<int>((static_cast<int64_t>(x) *
+                                             sourceWidth) /
+                                            targetWidth));
+      const uint8_t* src =
+          rgba + (static_cast<size_t>(srcY) * sourceWidth + srcX) * 4;
+      uint32_t red = src[0];
+      uint32_t green = src[1];
+      uint32_t blue = src[2];
+      const uint32_t alpha = src[3];
+      if (alpha < 255) {
+        red = (red * alpha) / 255;
+        green = (green * alpha) / 255;
+        blue = (blue * alpha) / 255;
+      }
+      const uint16_t color =
+          static_cast<uint16_t>(((red & 0xF8) << 8) |
+                                ((green & 0xFC) << 3) |
+                                (blue >> 3));
+      const size_t dst =
+          (static_cast<size_t>(offsetY + y) * kThumbnailSize + offsetX + x) *
+          2;
+      pixels[dst] = static_cast<uint8_t>(color >> 8);
+      pixels[dst + 1] = static_cast<uint8_t>(color);
+    }
   }
-  decoded.deleteSprite();
+  stbi_image_free(rgba);
 
-  if (!hasVisiblePixels(static_cast<const uint8_t*>(sprite.getBuffer()),
+  if (!hasVisiblePixels(pixels,
                         static_cast<size_t>(kThumbnailSize) * kThumbnailSize)) {
-    sprite.deleteSprite();
+    free(pixels);
     return false;
   }
 
@@ -1472,7 +2120,7 @@ bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
   if (LittleFS.exists(temporary)) LittleFS.remove(temporary);
   File output = LittleFS.open(temporary, FILE_WRITE);
   if (!output) {
-    sprite.deleteSprite();
+    free(pixels);
     return false;
   }
   const uint8_t header[8] = {
@@ -1482,21 +2130,17 @@ bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
       static_cast<uint8_t>(kThumbnailSize & 0xFF),
       static_cast<uint8_t>(kThumbnailSize >> 8),
   };
-  const uint8_t* pixels =
-      static_cast<const uint8_t*>(sprite.getBuffer());
-  const size_t bytes =
-      static_cast<size_t>(kThumbnailSize) * kThumbnailSize * 2;
   bool success = output.write(header, sizeof(header)) == sizeof(header);
   size_t written = 0;
-  while (success && written < bytes) {
-    const size_t chunk = min<size_t>(4096, bytes - written);
+  while (success && written < pixelBytes) {
+    const size_t chunk = min<size_t>(4096, pixelBytes - written);
     success = output.write(pixels + written, chunk) == chunk;
     written += chunk;
     vTaskDelay(1);
   }
   output.flush();
   output.close();
-  sprite.deleteSprite();
+  free(pixels);
   if (!success) {
     LittleFS.remove(temporary);
     return false;
@@ -1514,6 +2158,20 @@ void LogoManager::compactCache(const String& imagePath,
                                const String& thumbnail) {
   if (imagePath.startsWith("/cache/") && imagePath != thumbnail)
     LittleFS.remove(imagePath);
+}
+
+void LogoManager::purgeCachedArtwork(const String& key) {
+  if (key.isEmpty() || !key.startsWith("album:")) return;
+  const String stem = cacheStem(key);
+  const char* extensions[] = {
+      ".sr565", ".tmp", ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".payload",
+      ".emb"};
+  for (const char* extension : extensions) {
+    const String path = stem + extension;
+    if (LittleFS.exists(path) && LittleFS.remove(path)) {
+      Serial.printf("[cover] regi album cache torolve: %s\n", path.c_str());
+    }
+  }
 }
 
 void LogoManager::enforceCacheBudget(const String& keepPath) {
