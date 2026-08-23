@@ -45,10 +45,16 @@ bool DisplayManager::begin(const NowPlayingActions& actions) {
     Serial.printf("[display] LVGL puffer PSRAM-ban: %u px\n",
                   static_cast<unsigned>(drawBufferPixels_));
   } else {
-    drawBuffer_ = fallbackDrawBuffer_;
+    drawBuffer_ = static_cast<uint16_t*>(heap_caps_calloc(
+        kFallbackDrawBufferPixels, sizeof(uint16_t),
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     drawBufferPixels_ = kFallbackDrawBufferPixels;
     Serial.printf("[display] LVGL puffer belso RAM-ban: %u px\n",
                   static_cast<unsigned>(drawBufferPixels_));
+  }
+  if (!drawBuffer_) {
+    Serial.println("[display] LVGL puffer foglalasi hiba");
+    return false;
   }
   lv_display_set_buffers(lvDisplay_, drawBuffer_, nullptr,
                          drawBufferPixels_ * sizeof(uint16_t),

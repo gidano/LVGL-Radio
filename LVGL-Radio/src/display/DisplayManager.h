@@ -92,7 +92,6 @@ class DisplayManager {
   lv_display_t* lvDisplay_{nullptr};
   uint16_t* drawBuffer_{nullptr};
   uint32_t drawBufferPixels_{0};
-  uint16_t fallbackDrawBuffer_[kFallbackDrawBufferPixels]{};
   uint32_t previousTick_{0};
   uint32_t lastLvglRunAt_{0};
   uint8_t brightness_{204};
