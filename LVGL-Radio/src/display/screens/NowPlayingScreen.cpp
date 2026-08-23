@@ -642,10 +642,16 @@ void NowPlayingScreen::update(const AudioSnapshot& audio,
   if (!stationLabel_) return;
   updateBackground(backgroundEnabled, backgroundPath, backgroundOpacity);
   setLabelTextIfChanged(stationLabel_, audio.stationName.c_str());
-  const String displayTitle =
-      (audio.paused || (!audio.running && !audio.connecting))
-          ? String()
-          : audio.streamTitle;
+  const bool playbackStopped =
+      audio.paused || (!audio.running && !audio.connecting);
+  String displayTitle;
+  if (playbackStopped) {
+    displayTitle = audio.statusText;
+    displayTitle.trim();
+    if (displayTitle == "Leállítva") displayTitle = "";
+  } else {
+    displayTitle = audio.streamTitle;
+  }
   setLabelTextIfChanged(titleLabel_, displayTitle.c_str());
   char volumeText[8];
   snprintf(volumeText, sizeof(volumeText), "%u/21", audio.volume);
@@ -673,18 +679,13 @@ void NowPlayingScreen::update(const AudioSnapshot& audio,
   updateWifiHeader(wifiText);
   ipText_ = ipText.isEmpty() ? "IP: --.--.--.--" : "IP: " + ipText;
   setLabelTextIfChanged(ipLabel_, ipText_.c_str());
-  const bool playbackStopped =
-      audio.paused || (!audio.running && !audio.connecting);
   if (playButtonLabel_)
     setLabelTextIfChanged(playButtonLabel_,
                           playbackStopped ? "Lejátszás" : "Szünet");
 
   String info;
   if (playbackStopped) {
-    if (!audio.statusText.isEmpty())
-      info = audio.statusText;
-    else
-      info = "Nincs lejátszás";
+    info = "Nincs lejátszás";
   } else {
     if (!audio.codec.isEmpty()) info += audio.codec;
     if (audio.bitrateKbps > 0) {
