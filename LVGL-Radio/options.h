@@ -79,6 +79,10 @@
 #define I2S_LRC  47
 //#define I2S_MCLK 17
 
+/* Album cover lookup */
+#define USE_LASTFM_COVER
+#define LASTFM_API_KEY "9b120bd8ad9b0cf43f7918f284bcb9d6"
+
 /* ENCODER 1 */
 #define ENC_BTNR 6 // S2
 #define ENC_BTNL 4 // S1
