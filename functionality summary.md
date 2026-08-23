@@ -1,6 +1,6 @@
 # LVGL Radio – funkcióösszefoglaló / functionality summary
 
-Last updated / Utoljára frissítve: 2026-08-22
+Last updated / Utoljára frissítve: 2026-08-23
 
 ---
 
@@ -24,6 +24,8 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - station lista kezelése LittleFS-ben a `stations.txt` fájl alapján
 - webes kezelőfelület állomás- és beállításkezeléshez
 - állomáslogók megjelenítése
+- album-/lemezborító keresése Last.fm, MusicBrainz / Cover Art Archive,
+  iTunes és Deezer forrásokból
 - diagnosztikai nézet CPU / RAM / PSRAM / hőmérséklet / puffer adatokkal
 - időjárási adatok megjelenítése Open-Meteo alapokon (nincs szükség egyéni API-kulcsra!)
 - dátum és névnap megjelenítése
@@ -79,7 +81,24 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - Az aktuális állomás logóját mutatja
 - A logópanel sarkai LVGL oldalon vannak finoman lekerekítve / klippelve, így a szögletes külső logóképek sarkai nem rajzolódnak ki.
 - A logóképek, a `nologo.png` és az `.sr565` cache működő kezelése nincs átalakítva.
+- A logó az alapállapot: album-borító csak sikeres letöltés és thumbnail-készítés után váltja le.
+- Ha a borítókeresés sikertelen, kevés a puffer vagy kevés a belső RAM, a rádió az állomáslogót tartja meg.
 - Diagnosztikai nézetben a logó helyén diagnosztikai panel jelenhet meg
+
+#### 6/a. Album-borító keresés
+
+- A borítókeresés akkor indul, ha a stream címe `Előadó - Cím` formában értelmezhető.
+- Keresési sorrend:
+  - Last.fm közvetlen képek és albumadatok
+  - Last.fm MBID alapján MusicBrainz / Cover Art Archive release
+  - MusicBrainz release-group / Cover Art Archive jelöltek
+  - iTunes Search
+  - Deezer Search
+- A Last.fm használatához `LASTFM_API_KEY` kell az `options.h` fájlban.
+- MusicBrainz, Cover Art Archive, iTunes és Deezer ehhez a kereséshez nem igényel külön API-kulcsot.
+- A találat 128×128-as `.sr565` thumbnailként kerül cache-be.
+- Dalváltáskor a korábbi albumhoz tartozó cache célzottan törölhető, az állomáslogó-cache megtartása mellett.
+- HTTPS stream, alacsony hangpuffer vagy kevés belső heap esetén a keresés vár vagy kihagyja az aktuális dal borítóját, hogy a hang maradjon elsőbbségben.
 
 #### 7. Állomásnév terület
 
@@ -169,7 +188,7 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - állomáslista: `stations.txt`
 - Wi-Fi adatok: `wifi.txt`
 - logók: `/logos`
-- logó cache: `/cache`
+- logó és album-borító cache: `/cache`
 - holdfázis képek: `/moon_phases`
 - időjárás ikonok: `/weather_icons_48`
 - webes állományok: `/web`
@@ -184,6 +203,7 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 
 - a rádiólogók és időjárás ikonok stabil megjelenítéséhez optimalizált formátum használható
 - az állomáslogó panel 12 px körüli sarokklippelést használ; ez csak a kirajzolást érinti, a logófájlokat és cache-t nem módosítja
+- album-borító csak kész, érvényes cache-kép esetén jelenik meg; sikertelen keresésnél az állomáslogó marad
 - a holdfázis-kép PNG-ként töltődik be a LittleFS-ről, külön kezelési ágon
 - az időjárás ikonok jelenlegi, használt készlete 48×48-as megjelenítésre van optimalizálva
 - az időjárás sor és az ikon a dátumsor alja és a VU teteje közti sávban helyezkedik el
@@ -201,6 +221,8 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - Az állomáslogók és időjárás ikonok megjelenítésénél a stabil kirajzolás fontos szempont volt.
 - Az időjárás ikonok jelenleg a kijelzőn bevált, stabil megjelenítési útvonalat használják.
 - A működő állomáslogó-kezelést, beleértve a `nologo.png` és `.sr565` útvonalakat, más funkció kedvéért nem szabad átalakítani. A holdfázis megjelenítés külön PNG ágban marad.
+- A v0.2 borítókeresés az állomáslogó-kezelés fölött, de attól elkülönítve működik: nem vehet el alapképet, csak sikeres találat után cserélhet.
+- A nagy kép- és dekóderpufferek PSRAM-ba kerülnek, az LVGL tartalék rajzpuffer pedig nem foglal állandó belső RAM-ot. Ez kb. 10 kB belső RAM nyereséget adott a teszten.
 - A VU / spektrum-nál teljes vászonfrissítés a stabil állapot.
 - A vizualizáció módja Preferences-ben tárolódik (`vu_mode`), és webes settingsből is állítható.
 - A nem érintős használatot segítő kijelzőállapotok Preferences-ben tárolódnak: `ui_ip`, `ui_wifi`, `ui_vol`, `ui_diag`.
@@ -288,6 +310,8 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - station list handling based on `stations.txt` in LittleFS
 - web interface for station and settings management
 - station logo display
+- album artwork lookup from Last.fm, MusicBrainz / Cover Art Archive, iTunes,
+  and Deezer
 - diagnostic view with CPU / RAM / PSRAM / temperature / buffer data
 - weather information display based on Open-Meteo (No individual API key is required!)
 - date and nameday display
@@ -343,7 +367,24 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - Shows the current station logo
 - The logo panel corners are softly rounded / clipped by LVGL, so square external logo corners are hidden.
 - Existing handling for logo files, `nologo.png`, and the `.sr565` cache is not reworked.
+- The station logo is the baseline image: album artwork replaces it only after a successful download and thumbnail conversion.
+- If artwork lookup fails, the audio buffer is too low, or internal RAM is too low, the station logo stays visible.
 - In diagnostic mode, the logo area can be replaced by a diagnostics panel
+
+#### 6/a. Album artwork lookup
+
+- Artwork lookup starts when stream metadata can be parsed as `Artist - Title`.
+- Lookup order:
+  - Last.fm direct images and album data
+  - MusicBrainz / Cover Art Archive release through a Last.fm MBID
+  - MusicBrainz release-group / Cover Art Archive candidates
+  - iTunes Search
+  - Deezer Search
+- Last.fm requires `LASTFM_API_KEY` in `options.h`.
+- MusicBrainz, Cover Art Archive, iTunes, and Deezer do not require a separate API key for this lookup.
+- Successful artwork is cached as a 128×128 `.sr565` thumbnail.
+- On track changes, the previous album cache can be removed without touching station-logo cache entries.
+- On HTTPS streams, low audio buffer, or low internal heap, lookup waits or skips the current track artwork so audio playback remains the priority.
 
 #### 7. Station name area
 
@@ -431,7 +472,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - station list: `stations.txt`
 - Wi-Fi data: `wifi.txt`
 - logos: `/logos`
-- logo cache: `/cache`
+- logo and album artwork cache: `/cache`
 - moon phase images: `/moon_phases`
 - weather icons: `/weather_icons_48`
 - web assets: `/web`
@@ -446,6 +487,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 
 - optimized formats can be used for stable rendering of station logos and weather icons
 - the station logo panel uses about 12 px corner clipping; this affects rendering only and does not alter logo files or cache files
+- album artwork is shown only after a valid cached image exists; failed lookup keeps the station logo visible
 - the moon phase image is loaded from LittleFS as PNG through a separate display path
 - the currently used weather icon set is optimized for 48×48 display usage
 - the weather icon and weather text row are placed in the band between the bottom of the date row and the top of the VU area
@@ -463,6 +505,8 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - Stable rendering has been an important goal for station logos and weather icons.
 - Weather icons currently use the display path that proved stable on this hardware.
 - The working station logo handling, including `nologo.png` and `.sr565` paths, should not be reworked for other features. Moon phase rendering stays on its own PNG path.
+- The v0.2 artwork lookup works above the station-logo flow but remains separate from it: it cannot remove the baseline image, only replace it after a successful result.
+- Large image and decoder buffers are steered to PSRAM, and the LVGL fallback draw buffer no longer permanently consumes internal RAM. Testing showed about 10 kB more internal RAM.
 - Partial invalidation of the VU / spectrum broke background transparency on this display, so full canvas invalidation is the stable state.
 - The diagnostics view uses `BUFFER` for the audio buffer label, matching the other English labels.
 - The web UI is available in 4 languages, but the radio display UI itself is not fully multilingual yet; radio-side labels, messages, and nameday files are a separate development task.
@@ -524,7 +568,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - Stations: `stations.txt`
 - Wi-Fi data: `wifi.txt`
 - Logos: `/logos`
-- Logo cache: `/cache`
+- Logo and album artwork cache: `/cache`
 - Moon phase images: `/moon_phases`
 - Weather icons: `/weather_icons_48`
 - Web assets: `/web`

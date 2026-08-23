@@ -43,10 +43,12 @@ Invertálási fájlok:
 
 ---
 
-# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A/CS4344 with MCLK pin
+# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
 
 Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 `options.h` hardverkiosztásához.
+
+Aktuális saját változat: **v0.2**.
 
 ## Támogatott kijelző- és érintésprofilok
 
@@ -104,6 +106,23 @@ le egy későbbi, eltérően viselkedő kiadásra.
   oszlopok közötti hézagokat nem rajzolják át.
 - A VU / spektrum teljes vászonfrissítést használ. Ez fontos, mert a részleges
   frissítés ezen a kijelzőn fekete sávot okozott a háttérképes megjelenítésnél.
+- Ha a stream címinformációja `Előadó - Cím` formában érkezik, a rádió
+  album-/lemezborítót próbál keresni. Az állomáslogó a kiindulási állapot:
+  borító csak akkor cseréli le, ha a letöltés és a 128 × 128-as `.sr565`
+  thumbnail elkészítése is sikeres. Sikertelen vagy kihagyott keresésnél az
+  állomáslogó marad látható.
+- A v0.2 borítókeresési sorrendje: Last.fm, Last.fm MBID alapján
+  MusicBrainz / Cover Art Archive, MusicBrainz release-group / Cover Art
+  Archive, iTunes Search, Deezer Search. A Last.fm használatához
+  `LASTFM_API_KEY` szükséges az `options.h` fájlban; MusicBrainz, Cover Art
+  Archive, iTunes és Deezer ehhez a használathoz nem igényel külön API-kulcsot.
+- A borítókeresés a hangstabilitást védi: HTTPS streamnél magasabb
+  audiopuffer-küszöböt használ, belső RAM-hiány esetén vár vagy kihagyja az
+  aktuális szám borítóját. A nagy kép- és dekóderpufferek PSRAM-ba kerülnek,
+  az LVGL tartalék rajzpuffer pedig nem foglal állandó belső RAM-ot.
+- Az album-borítók gyorsan cserélődő cache-elemek. Dalváltáskor a korábbi
+  albumhoz tartozó cache célzottan törlődhet, de az állomáslogók cache-e
+  megmarad. A teljes cache méretét külön takarító rutin is korlátozza.
 - A vizualizáció módja webes beállításból is választható: spektrum,
   sztereó VU vagy üres alsó sáv. Ez nem érintőképernyős használatnál is
   elérhetővé teszi a váltást.
@@ -279,10 +298,12 @@ gombját (`GPIO5`).
 
 # English Summary
 
-## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A/CS4344 with MCLK pin
+## LVGL Radio - ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
 
 This project is a modular LVGL-based internet radio and local network music
 player for the hardware layout defined in `options.h`.
+
+Current custom version: **v0.2**.
 
 ## Supported Display And Touch Profiles
 
@@ -341,6 +362,24 @@ release with different behavior.
 - The VU / spectrum uses full canvas invalidation. This is intentional because
   partial invalidation caused black bands around the visualization when
   background images were used.
+- If stream metadata arrives as `Artist - Title`, the radio can look up album
+  artwork and show it in the station logo area. The station logo is always the
+  baseline image: album art replaces it only after a successful download and
+  `.sr565` thumbnail conversion. If lookup fails or is skipped, the station
+  logo remains visible.
+- The v0.2 artwork lookup order is: Last.fm, MusicBrainz / Cover Art Archive
+  through a Last.fm MBID, MusicBrainz release-group / Cover Art Archive, iTunes
+  Search, then Deezer Search. Last.fm requires `LASTFM_API_KEY` in `options.h`;
+  MusicBrainz, Cover Art Archive, iTunes, and Deezer do not require a separate
+  API key for this usage.
+- Artwork lookup protects audio playback: HTTPS streams require a larger audio
+  buffer before lookup starts, low internal heap pauses or skips the current
+  track artwork, and large image/decode buffers are steered to PSRAM. The LVGL
+  fallback draw buffer no longer permanently consumes internal RAM when the
+  normal draw buffer is in PSRAM.
+- Album artwork cache entries are treated as short-lived. On track changes the
+  previous album cache can be removed without touching the station-logo cache;
+  a separate cache budget routine also limits total cache size.
 - The visualization mode can also be selected from the web settings: spectrum,
   stereo VU, or blank bottom band. This makes the setting available even
   without a touchscreen.
