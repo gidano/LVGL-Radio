@@ -294,6 +294,8 @@ Az érintő kalibrációja NVS-be kerül, ezért csak egyszer fut le. Új
 kalibráláshoz bekapcsolás vagy reset közben tartsd nyomva az első encoder
 gombját (`GPIO5`).
 
+<b>Az ILI9488 kapacitív/ST7796 kijelzők támogatásáért és az albumborítók használatának ötletéért köszönet illeti Simon Zsolt-ot!</b>
+
 ---
 
 # English Summary
