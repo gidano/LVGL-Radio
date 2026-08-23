@@ -281,6 +281,7 @@ void RadioController::loop() {
         logoManager_.setEmbeddedImage(currentPlayUrl_, segments);
       }
     }
+    logoManager_.setAlbumTitle(audioSnapshot().streamTitle);
     logoManager_.loop(running, bufferFilled);
   }
 
