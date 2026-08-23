@@ -520,3 +520,5 @@ firmware fallback font available. Space (`U+0020`) is included in both fonts.
 
 Touch calibration is stored in NVS and normally runs only once. To recalibrate,
 hold the first encoder button (`GPIO5`) during power-on or reset.
+
+<b>Thanks are due for the support for ILI9488 capacitive/ST7796 displays and for the idea of using album covers [Simon Zsolt](https://github.com/SimZs)!</b>
