@@ -60,12 +60,16 @@ bool DisplayManager::begin(const NowPlayingActions& actions) {
                          drawBufferPixels_ * sizeof(uint16_t),
                          LV_DISPLAY_RENDER_MODE_PARTIAL);
 
+#if TOUCH_ENABLED
   calibrateTouch();
 
   lv_indev_t* input = lv_indev_create();
   lv_indev_set_type(input, LV_INDEV_TYPE_POINTER);
   lv_indev_set_display(input, lvDisplay_);
   lv_indev_set_read_cb(input, readTouch);
+#else
+  Serial.println("[display] touch kikapcsolva, kalibracio kihagyva");
+#endif
 
   presets_.begin();
   screen_.create(fonts_, actions);
@@ -355,6 +359,10 @@ void DisplayManager::flush(lv_display_t* display, const lv_area_t* area,
 }
 
 void DisplayManager::readTouch(lv_indev_t*, lv_indev_data_t* data) {
+#if !TOUCH_ENABLED
+  data->state = LV_INDEV_STATE_RELEASED;
+  return;
+#else
   if (!instance_) return;
   uint16_t x = 0;
   uint16_t y = 0;
@@ -407,6 +415,7 @@ void DisplayManager::readTouch(lv_indev_t*, lv_indev_data_t* data) {
     instance_->verticalSwipe_ = false;
     data->state = LV_INDEV_STATE_RELEASED;
   }
+#endif
 }
 
 void DisplayManager::showStationSelector() {
@@ -964,7 +973,9 @@ void DisplayManager::closePresetsEvent(lv_event_t* event) {
 }
 
 void DisplayManager::calibrateTouch() {
-#if TS_MODEL == TS_MODEL_FT6X36
+#if !TOUCH_ENABLED
+  return;
+#elif TS_MODEL == TS_MODEL_FT6X36
   // Az FT6X36 abszolut koordinatakat ad. Az XPT2046-hoz keszult
   // negypontos kalibracio elrontana a kapacitiv panel koordinatait.
   return;

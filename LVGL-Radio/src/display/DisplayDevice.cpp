@@ -14,7 +14,7 @@ DisplayDevice::DisplayDevice() {
     config.dma_channel = SPI_DMA_CH_AUTO;
     config.pin_sclk = TFT_SCK;
     config.pin_mosi = TFT_MOSI;
-#if TS_MODEL == TS_MODEL_XPT2046
+#if TOUCH_ENABLED && TS_MODEL == TS_MODEL_XPT2046
     // GPIO13 fizikailag az XPT2046 MISO-ja. Az ILI9488 olvasása tiltott.
     config.pin_miso = TS_MISO;
 #else
@@ -45,6 +45,7 @@ DisplayDevice::DisplayDevice() {
     panel_.config(config);
   }
 
+#if TOUCH_ENABLED
   {
     auto config = touch_.config();
 #if TS_MODEL == TS_MODEL_FT6X36
@@ -79,11 +80,16 @@ DisplayDevice::DisplayDevice() {
     touch_.config(config);
     panel_.setTouch(&touch_);
   }
+#endif
 
   setPanel(&panel_);
 }
 
 void DisplayDevice::prepareTouch() {
+#if TOUCH_ENABLED
   // A touch vezerlo konfiguracioja a konstruktorban keszul el;
   // az inicializalast a kesobbi LGFX_Device::init() vegzi.
+#else
+  // Nem erintos build: nincs touch vezerlo es nincs kalibracio.
+#endif
 }

@@ -16,9 +16,9 @@ class DisplayDevice : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9488 panel_;
 #endif
   lgfx::Bus_SPI bus_;
-#if TS_MODEL == TS_MODEL_FT6X36
+#if TOUCH_ENABLED && TS_MODEL == TS_MODEL_FT6X36
   lgfx::Touch_FT5x06 touch_;
-#else
+#elif TOUCH_ENABLED
   lgfx::Touch_XPT2046 touch_;
 #endif
 };
