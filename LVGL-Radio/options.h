@@ -11,8 +11,8 @@
     #define ARDUINO_ESP32S3_DEV
 #endif
 
-#define LANGUAGE HU // HU Enter your own language here!!
-#define NAMEDAYS_FILE HU // HU
+#define LANGUAGE HU // HU NL PL RU EN EL Enter your own language here!!
+#define NAMEDAYS_FILE HU // HU, PL, NL
 /*****************************************/
 
 #define DSP_MODEL DSP_ILI9488
@@ -54,15 +54,21 @@
    Alapértelmezés: a saját rádió rezisztív XPT2046 panelje.
    Ha a kapacitív ILI9488 kell, csak a
    TOUCH_PROFILE_FT6X36 értékét állítsd 1-re. */
-   // 0 = saját rádió / rezisztív XPT2046
+// 0 = nincs érintés / encoderes vagy webes használat
+// 1 = érintőpanel engedélyezve
+#ifndef TOUCH_ENABLED
+#define TOUCH_ENABLED 1
+#endif
+
+// 0 = saját rádió / rezisztív XPT2046
 // 1 = kapacitív ILI9488 / FT6X36 teszt-build
 #ifndef TOUCH_PROFILE_FT6X36
 #define TOUCH_PROFILE_FT6X36 0
 #endif
 
-#if TOUCH_PROFILE_FT6X36
+#if TOUCH_ENABLED && TOUCH_PROFILE_FT6X36
   #include "options_touch_ft6x36.h"
-#else
+#elif TOUCH_ENABLED
   #include "options_touch_xpt2046.h"
 #endif
 /*****************************************/
@@ -81,7 +87,7 @@
 
 /* Album cover lookup */
 #define USE_LASTFM_COVER
-#define LASTFM_API_KEY "API Key"    // https://www.last.fm/api/authentication Szerezz be ingyenes API-key-t és add meg itt / Get an Last.fm API Key
+#define LASTFM_API_KEY "9b120bd8ad9b0cf43f7918f284bcb9d6"
 
 /* ENCODER 1 */
 #define ENC_BTNR 6 // S2
