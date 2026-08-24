@@ -50,12 +50,10 @@ Invertálási fájlok:
 
 ---
 
-# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A
+# LVGL Radio – ESP32-S3, ILI9488 / ST7796, XPT2046 / FT6X36, PCM5102A/CJMCU CS4344
 
 Moduláris LVGL-alapú internet és helyi hálózati zenelejátszó az
 `options.h` hardverkiosztásához.
-
-Aktuális saját változat: **v0.2**.
 
 ## Támogatott kijelző- és érintésprofilok
 
@@ -123,6 +121,10 @@ le egy későbbi, eltérően viselkedő kiadásra.
   Archive, iTunes Search, Deezer Search. A Last.fm használatához
   `LASTFM_API_KEY` szükséges az `options.h` fájlban; MusicBrainz, Cover Art
   Archive, iTunes és Deezer ehhez a használathoz nem igényel külön API-kulcsot.
+- A Last.fm metaadat- és képtalálatok a [Last.fm](https://www.last.fm/)
+  szolgáltatásból származhatnak. Köszönet a Last.fm adatbázisának és API-jának,
+  amely segíti az albumborítók azonosítását. Ez a szoftver hobbi célú,
+  nyílt forrású projekt, nem kereskedelmi termék.
 - A borítókeresés a hangstabilitást védi: HTTPS streamnél magasabb
   audiopuffer-küszöböt használ, belső RAM-hiány esetén vár vagy kihagyja az
   aktuális szám borítóját. A nagy kép- és dekóderpufferek PSRAM-ba kerülnek,
@@ -301,7 +303,7 @@ Az érintő kalibrációja NVS-be kerül, ezért csak egyszer fut le. Új
 kalibráláshoz bekapcsolás vagy reset közben tartsd nyomva az első encoder
 gombját (`GPIO5`).
 
-<b>Az ILI9488 kapacitív/ST7796 kijelzők támogatásáért és az albumborítók használatának ötletéért köszönet illeti [Simon Zsolt](https://github.com/SimZs)!</b>
+<b>Az ILI9488 kapacitív/ST7796 kijelzők támogatásáért és az albumborítók használatának ötletéért köszönet illeti: [Simon Zsolt](https://github.com/SimZs)!</b>
 
 ---
 
@@ -311,8 +313,6 @@ gombját (`GPIO5`).
 
 This project is a modular LVGL-based internet radio and local network music
 player for the hardware layout defined in `options.h`.
-
-Current custom version: **v0.2**.
 
 ## Supported Display And Touch Profiles
 
@@ -381,6 +381,10 @@ release with different behavior.
   Search, then Deezer Search. Last.fm requires `LASTFM_API_KEY` in `options.h`;
   MusicBrainz, Cover Art Archive, iTunes, and Deezer do not require a separate
   API key for this usage.
+- Last.fm metadata and image matches may come from the
+  [Last.fm](https://www.last.fm/) service. Credit and thanks go to the Last.fm
+  database and API for helping identify album artwork. This software is a
+  hobby-oriented open-source project, not a commercial product.
 - Artwork lookup protects audio playback: HTTPS streams require a larger audio
   buffer before lookup starts, low internal heap pauses or skips the current
   track artwork, and large image/decode buffers are steered to PSRAM. The LVGL
