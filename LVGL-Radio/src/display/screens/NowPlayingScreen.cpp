@@ -27,7 +27,7 @@ constexpr uint32_t kIpVisibleDurationMs = 10000;
 constexpr lv_coord_t kHeaderTitleTop = 6;
 constexpr lv_coord_t kHeaderTitleHeight = 24;
 constexpr bool kMoonPhaseEnabled = true;
-constexpr int kMoonPhaseCount = 8;
+constexpr int kMoonPhaseCount = 10;
 constexpr double kPi = 3.14159265358979323846;
 constexpr int kMoonImageWidth = 90;
 constexpr int kMoonImageHeight = 82;
@@ -83,16 +83,25 @@ int moonPhaseIndex(const tm& localTime) {
   const time_t current = mktime(&moonTime);
   if (current <= 0) return 0;
 
-  // Reference new moon: 2026-08-12 17:36 UTC. The image set follows the
-  // classic eight moon phases, with new moon centered on index 0.
+  // Reference new moon: 2026-08-12 17:36 UTC. The image set uses ten visual
+  // states, with extra waxing/waning near-full images around the full moon.
   constexpr double kReferenceNewMoon = 1786556160.0;
   constexpr double kSynodicMonthDays = 29.53058867;
   double days = (static_cast<double>(current) - kReferenceNewMoon) / 86400.0;
   double cycle = days / kSynodicMonthDays;
   double phase = cycle - floor(cycle);
   if (phase < 0.0) phase += 1.0;
-  return static_cast<int>(floor(phase * kMoonPhaseCount + 0.5)) %
-         kMoonPhaseCount;
+
+  if (phase < 0.060 || phase >= 0.960) return 0;
+  if (phase < 0.160) return 1;
+  if (phase < 0.245) return 2;
+  if (phase < 0.355) return 3;
+  if (phase < 0.485) return 4;
+  if (phase < 0.535) return 5;
+  if (phase < 0.665) return 6;
+  if (phase < 0.785) return 7;
+  if (phase < 0.895) return 8;
+  return 9;
 }
 
 uint8_t moonAlphaFromPixel(uint8_t r, uint8_t g, uint8_t b, uint8_t pngAlpha,
