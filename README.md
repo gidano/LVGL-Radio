@@ -97,11 +97,12 @@ le egy későbbi, eltérően viselkedő kiadásra.
   Ez csak a kirajzolást érinti, a logófájlokat, a `nologo.png` működését és
   az `.sr565` cache-kezelést nem módosítja.
 - A holdfázis megjelenítés külön PNG ágon működik. A képek a
-  `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`
+  `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`
   útvonalakon vannak, 90 × 82 px méretben.
-- A dátum szerinti képkiválasztás a szinódikus holdhónapot 8 középre igazított
-  szeletre osztja, ezért a telihold kép csak a ciklus közepén jelenik meg, nem
-  pusztán magas megvilágítottsági százaléknál.
+- A dátum szerinti képkiválasztás a szinódikus holdhónapot 10 vizuális
+  állapotra osztja. A telihold képe szűkebb fázistartományban jelenik meg, a
+  telihold előtti és utáni időszakhoz külön növő/fogyó majdnem telihold képek
+  tartoznak, így nincs nagy ugrás félhold és telihold között.
 - A holdkép pozíciója a spektrum látható jobb széle és az óra bal oldala
   közötti területhez van igazítva.
 - A hold PNG alfa csatornája megmarad, a majdnem fekete szélek finoman
@@ -356,11 +357,12 @@ release with different behavior.
   affects rendering and does not modify logo files, `nologo.png`, or `.sr565`
   cache handling.
 - Moon phase rendering uses its own PNG path. Files are stored as
-  `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`, with a
+  `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`, with a
   current size of 90 × 82 px.
-- Date-based image selection divides the synodic lunar month into 8 centered
-  slices, so the full moon image appears around the middle of the cycle, not
-  merely when illumination is high.
+- Date-based image selection maps the synodic lunar month to 10 visual states.
+  The full moon image is used in a narrower phase range, while extra
+  waxing/waning near-full images bridge the days around it, avoiding a large
+  visual jump between half moon and full moon.
 - The moon image is positioned between the visible right edge of the spectrum
   and the left edge of the clock.
 - PNG alpha is preserved for the moon image, and nearly black edge pixels are

@@ -147,9 +147,9 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 #### 12. Holdfázis-kép
 
 - A holdfázis külön PNG megjelenítési ágon működik, nem az állomáslogó-cache közösítésével.
-- A képek helye: `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`.
+- A képek helye: `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`.
 - A használt képméret: 90×82 px.
-- A dátum szerinti választás a szinódikus holdhónapot 8 középre igazított szeletre osztja, így a növő / telő / fogyó állapotok sorrendje nem pusztán megvilágítottsági százalék alapján dől el.
+- A dátum szerinti választás a szinódikus holdhónapot 10 vizuális állapotra osztja; a telihold képe szűkebb fázistartományban jelenik meg, a telihold előtti és utáni időszakhoz külön majdnem telihold képek tartoznak, így nincs nagy ugrás félhold és telihold között.
 - A kép a spektrum látható jobb széle és az óra bal oldala közötti területhez igazított pozícióban jelenik meg.
 - A PNG alfa csatornája megmarad; a majdnem fekete szélek külön finomított áttetszőséget kapnak, hogy háttérképeken ne látszódjon fekete keret.
 
@@ -434,9 +434,9 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 #### 12. Moon phase image
 
 - Moon phase rendering uses a separate PNG path and is not merged into the station logo cache flow.
-- Files are stored as `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_7.png`.
+- Files are stored as `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`.
 - Current image size: 90×82 px.
-- Date-based selection divides the synodic lunar month into 8 centered slices, so waxing / full / waning states are not chosen from illumination percentage alone.
+- Date-based selection maps the synodic lunar month to 10 visual states; the full moon image is used in a narrower phase range, while extra waxing/waning near-full images avoid a large visual jump between half moon and full moon.
 - The image is positioned within the area between the visible right edge of the spectrum and the left edge of the clock.
 - PNG alpha is preserved; nearly black border pixels receive a tuned fade so the black frame does not show on background images.
 
