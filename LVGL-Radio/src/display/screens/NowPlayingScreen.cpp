@@ -12,6 +12,7 @@
 #include <time.h>
 
 #include "../../time/DateNameday.h"
+#include "options.h"
 
 namespace {
 
@@ -1117,6 +1118,13 @@ void NowPlayingScreen::setHeaderIpVisible(bool visible) {
   updateClockIpVisibility(millis());
 }
 
+void NowPlayingScreen::showStartupIp(uint32_t durationMs) {
+  ipVisible_ = true;
+  ipVisibleUntil_ = millis() + durationMs;
+  setLabelTextIfChanged(ipLabel_, ipText_.c_str());
+  updateClockIpVisibility(millis());
+}
+
 bool NowPlayingScreen::headerIpVisible() const { return ipVisible_; }
 
 void NowPlayingScreen::setWifiDetailsVisible(bool visible) {
@@ -1473,7 +1481,7 @@ bool NowPlayingScreen::loadMoonPhasePng(int phase) {
       const int x = static_cast<int>(i % kMoonImageWidth);
       const int y = static_cast<int>(i / kMoonImageWidth);
       alphaPlane[i] = moonAlphaFromPixel(r, g, b, 255, x, y);
-      }
+    }
     sprite.deleteSprite();
     dataSize = fallbackBytes;
     colorFormat = LV_COLOR_FORMAT_RGB565A8;
