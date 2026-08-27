@@ -196,6 +196,7 @@ bool RadioController::begin() {
   display_.setScreenFlipped(screenFlipped_);
   display_.setVisualizerMode(static_cast<WaveVu::Mode>(visualizerMode_));
   display_.setHeaderIpVisible(headerIpVisible_);
+  if (!headerIpVisible_) display_.showStartupIp(10000);
   display_.setWifiDetailsVisible(wifiDetailsVisible_);
   display_.setVolumeGraphicVisible(volumeGraphicVisible_);
   display_.setDiagnosticsVisible(diagnosticsVisible_);
