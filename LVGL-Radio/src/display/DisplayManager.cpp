@@ -174,6 +174,10 @@ void DisplayManager::setHeaderIpVisible(bool visible) {
   screen_.setHeaderIpVisible(visible);
 }
 
+void DisplayManager::showStartupIp(uint32_t durationMs) {
+  screen_.showStartupIp(durationMs);
+}
+
 bool DisplayManager::headerIpVisible() const { return headerIpVisible_; }
 
 void DisplayManager::setWifiDetailsVisible(bool visible) {

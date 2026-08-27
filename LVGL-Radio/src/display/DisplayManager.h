@@ -31,6 +31,7 @@ class DisplayManager {
   void setVisualizerMode(WaveVu::Mode mode);
   WaveVu::Mode visualizerMode() const;
   void setHeaderIpVisible(bool visible);
+  void showStartupIp(uint32_t durationMs);
   bool headerIpVisible() const;
   void setWifiDetailsVisible(bool visible);
   bool wifiDetailsVisible() const;
