@@ -27,6 +27,11 @@ constexpr uint32_t kVolumePopupDurationMs = 1500;
 constexpr uint32_t kIpVisibleDurationMs = 10000;
 constexpr lv_coord_t kHeaderTitleTop = 6;
 constexpr lv_coord_t kHeaderTitleHeight = 24;
+constexpr lv_coord_t kBufferBarLeft = 158;
+constexpr lv_coord_t kBufferBarTop = 73;
+constexpr lv_coord_t kBufferBarWidth = 308;
+constexpr lv_coord_t kBufferBarHeight = 3;
+constexpr uint32_t kBufferBarUpdateMs = 1000;
 constexpr bool kMoonPhaseEnabled = true;
 constexpr int kMoonPhaseCount = 10;
 constexpr double kPi = 3.14159265358979323846;
@@ -140,6 +145,8 @@ void NowPlayingScreen::create(FontManager& fonts,
   currentMoon_.clear();
   moonPath_.clear();
   lastMoonPhase_ = -1;
+  currentBufferPercent_ = 255;
+  lastBufferBarUpdateAt_ = 0;
   if (moonPixels_) {
     free(moonPixels_);
     moonPixels_ = nullptr;
@@ -392,6 +399,28 @@ void NowPlayingScreen::create(FontManager& fonts,
   lv_obj_add_flag(stationLabel_, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_ext_click_area(stationLabel_, 8);
   lv_obj_add_event_cb(stationLabel_, stationEvent, LV_EVENT_CLICKED, this);
+
+  bufferBarTrack_ = lv_obj_create(screen);
+  lv_obj_set_pos(bufferBarTrack_, kBufferBarLeft, kBufferBarTop);
+  lv_obj_set_size(bufferBarTrack_, kBufferBarWidth, kBufferBarHeight);
+  lv_obj_set_style_bg_color(bufferBarTrack_, lv_color_hex(0x1E293B), 0);
+  lv_obj_set_style_bg_opa(bufferBarTrack_, LV_OPA_60, 0);
+  lv_obj_set_style_border_width(bufferBarTrack_, 0, 0);
+  lv_obj_set_style_radius(bufferBarTrack_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_pad_all(bufferBarTrack_, 0, 0);
+  lv_obj_clear_flag(bufferBarTrack_, LV_OBJ_FLAG_SCROLLABLE);
+
+  bufferBarFill_ = lv_obj_create(bufferBarTrack_);
+  lv_obj_set_pos(bufferBarFill_, 0, 0);
+  lv_obj_set_size(bufferBarFill_, 0, kBufferBarHeight);
+  lv_obj_set_style_bg_color(bufferBarFill_, lv_color_hex(0x7DD3FC), 0);
+  lv_obj_set_style_bg_opa(bufferBarFill_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(bufferBarFill_, 0, 0);
+  lv_obj_set_style_radius(bufferBarFill_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_pad_all(bufferBarFill_, 0, 0);
+  lv_obj_clear_flag(bufferBarFill_, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(bufferBarFill_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(bufferBarTrack_, LV_OBJ_FLAG_HIDDEN);
 
   titleLabel_ = lv_label_create(screen);
   lv_obj_set_pos(titleLabel_, 158, 76);
@@ -781,9 +810,46 @@ void NowPlayingScreen::update(const AudioSnapshot& audio,
       setLabelTextIfChanged(namedayLabel_, "");
   }
   updateClockIpVisibility(millis());
+  updateBufferBar(audio);
   updateWeather(weather);
   updateLogo(logoName);
   updateDiagnostics(diagnostics, bufferText);
+}
+
+void NowPlayingScreen::updateBufferBar(const AudioSnapshot& audio) {
+  if (!bufferBarTrack_ || !bufferBarFill_) return;
+  const bool visible =
+      bufferBarVisible_ && (audio.running || audio.connecting ||
+                            audio.bufferFilledBytes > 0);
+  if (!visible) {
+    lv_obj_add_flag(bufferBarTrack_, LV_OBJ_FLAG_HIDDEN);
+    currentBufferPercent_ = 255;
+    lastBufferBarUpdateAt_ = 0;
+    return;
+  }
+
+  lv_obj_remove_flag(bufferBarTrack_, LV_OBJ_FLAG_HIDDEN);
+  const uint8_t percent = std::min<uint8_t>(audio.bufferPercent, 100);
+  if (percent == currentBufferPercent_) return;
+  const uint32_t now = millis();
+  if (currentBufferPercent_ != 255 &&
+      now - lastBufferBarUpdateAt_ < kBufferBarUpdateMs) {
+    return;
+  }
+  currentBufferPercent_ = percent;
+  lastBufferBarUpdateAt_ = now;
+
+  if (percent == 0) {
+    lv_obj_add_flag(bufferBarFill_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_width(bufferBarFill_, 0);
+    return;
+  }
+
+  const lv_coord_t width =
+      std::max<lv_coord_t>(kBufferBarHeight,
+                           (kBufferBarWidth * percent + 50) / 100);
+  lv_obj_set_width(bufferBarFill_, width);
+  lv_obj_remove_flag(bufferBarFill_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void NowPlayingScreen::updateBackground(bool enabled, const String& path,
@@ -1144,6 +1210,19 @@ void NowPlayingScreen::setVolumeGraphicVisible(bool visible) {
 
 bool NowPlayingScreen::volumeGraphicVisible() const {
   return volumeGraphicVisible_;
+}
+
+void NowPlayingScreen::setBufferBarVisible(bool visible) {
+  bufferBarVisible_ = visible;
+  if (!visible && bufferBarTrack_) {
+    lv_obj_add_flag(bufferBarTrack_, LV_OBJ_FLAG_HIDDEN);
+    currentBufferPercent_ = 255;
+    lastBufferBarUpdateAt_ = 0;
+  }
+}
+
+bool NowPlayingScreen::bufferBarVisible() const {
+  return bufferBarVisible_;
 }
 
 void NowPlayingScreen::setDiagnosticsVisible(bool visible) {
