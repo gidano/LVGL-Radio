@@ -92,16 +92,17 @@ int moonPhaseIndex(const tm& localTime) {
   double cycle = days / kSynodicMonthDays;
   double phase = cycle - floor(cycle);
   if (phase < 0.0) phase += 1.0;
+  const double ageDays = phase * kSynodicMonthDays;
 
-  if (phase < 0.060 || phase >= 0.960) return 0;
-  if (phase < 0.160) return 1;
-  if (phase < 0.245) return 2;
-  if (phase < 0.355) return 3;
-  if (phase < 0.485) return 4;
-  if (phase < 0.535) return 5;
-  if (phase < 0.665) return 6;
-  if (phase < 0.785) return 7;
-  if (phase < 0.895) return 8;
+  if (ageDays < 1.7 || ageDays >= 28.3) return 0;
+  if (ageDays < 4.7) return 1;
+  if (ageDays < 7.4) return 2;
+  if (ageDays < 10.4) return 3;
+  if (ageDays < 13.2) return 4;
+  if (ageDays < 17.0) return 5;
+  if (ageDays < 19.7) return 6;
+  if (ageDays < 22.6) return 7;
+  if (ageDays < 25.5) return 8;
   return 9;
 }
 
