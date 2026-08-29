@@ -149,7 +149,7 @@ Az LVGL Radio egy ESP32-S3 alapú internetes rádió felület, amely LVGL kijelz
 - A holdfázis külön PNG megjelenítési ágon működik, nem az állomáslogó-cache közösítésével.
 - A képek helye: `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`.
 - A használt képméret: 90×82 px.
-- A dátum szerinti választás a szinódikus holdhónapot 10 vizuális állapotra osztja; a telihold képe szűkebb fázistartományban jelenik meg, a telihold előtti és utáni időszakhoz külön majdnem telihold képek tartoznak, így nincs nagy ugrás félhold és telihold között.
+- A dátum szerinti választás az újhold óta eltelt holdkor-napok alapján osztja a szinódikus holdhónapot 10 vizuális állapotra; a telihold képe több napos telihold-közeli tartományban marad, a környező időszakhoz pedig külön növő/fogyó majdnem telihold képek tartoznak.
 - A kép a spektrum látható jobb széle és az óra bal oldala közötti területhez igazított pozícióban jelenik meg.
 - A PNG alfa csatornája megmarad; a majdnem fekete szélek külön finomított áttetszőséget kapnak, hogy háttérképeken ne látszódjon fekete keret.
 
@@ -436,7 +436,7 @@ LVGL Radio is an ESP32-S3 based internet radio interface using LVGL for display 
 - Moon phase rendering uses a separate PNG path and is not merged into the station logo cache flow.
 - Files are stored as `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`.
 - Current image size: 90×82 px.
-- Date-based selection maps the synodic lunar month to 10 visual states; the full moon image is used in a narrower phase range, while extra waxing/waning near-full images avoid a large visual jump between half moon and full moon.
+- Date-based selection uses lunar age days since the last new moon to map the synodic month to 10 visual states; the full moon image remains active for a multi-day near-full range, while extra waxing/waning near-full images bridge the surrounding days.
 - The image is positioned within the area between the visible right edge of the spectrum and the left edge of the clock.
 - PNG alpha is preserved; nearly black border pixels receive a tuned fade so the black frame does not show on background images.
 

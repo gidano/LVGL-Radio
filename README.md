@@ -99,10 +99,10 @@ le egy későbbi, eltérően viselkedő kiadásra.
 - A holdfázis megjelenítés külön PNG ágon működik. A képek a
   `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`
   útvonalakon vannak, 90 × 82 px méretben.
-- A dátum szerinti képkiválasztás a szinódikus holdhónapot 10 vizuális
-  állapotra osztja. A telihold képe szűkebb fázistartományban jelenik meg, a
-  telihold előtti és utáni időszakhoz külön növő/fogyó majdnem telihold képek
-  tartoznak, így nincs nagy ugrás félhold és telihold között.
+- A dátum szerinti képkiválasztás az újhold óta eltelt holdkor-napok alapján
+  osztja a szinódikus holdhónapot 10 vizuális állapotra. A telihold képe több
+  napos telihold-közeli tartományban marad, a telihold előtti és utáni
+  időszakhoz pedig külön növő/fogyó majdnem telihold képek tartoznak.
 - A holdkép pozíciója a spektrum látható jobb széle és az óra bal oldala
   közötti területhez van igazítva.
 - A hold PNG alfa csatornája megmarad, a majdnem fekete szélek finoman
@@ -359,10 +359,10 @@ release with different behavior.
 - Moon phase rendering uses its own PNG path. Files are stored as
   `/moon_phases/moon_phase_0.png` ... `/moon_phases/moon_phase_9.png`, with a
   current size of 90 × 82 px.
-- Date-based image selection maps the synodic lunar month to 10 visual states.
-  The full moon image is used in a narrower phase range, while extra
-  waxing/waning near-full images bridge the days around it, avoiding a large
-  visual jump between half moon and full moon.
+- Date-based image selection uses lunar age days since the last new moon to map
+  the synodic month to 10 visual states. The full moon image remains active for
+  a multi-day near-full range, while extra waxing/waning near-full images bridge
+  the surrounding days.
 - The moon image is positioned between the visible right edge of the spectrum
   and the left edge of the clock.
 - PNG alpha is preserved for the moon image, and nearly black edge pixels are
