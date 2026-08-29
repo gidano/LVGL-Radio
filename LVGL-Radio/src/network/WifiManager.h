@@ -35,6 +35,7 @@ class WifiManager {
   std::vector<Credential> credentials_;
   bool accessPointMode_{false};
   uint32_t lastReconnectAttempt_{0};
+  uint32_t disconnectedSince_{0};
   mutable bool hasSmoothedRssi_{false};
   mutable int smoothedRssi_{-70};
 };

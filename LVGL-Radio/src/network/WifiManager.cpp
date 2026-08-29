@@ -8,6 +8,10 @@ constexpr const char* kCredentialsPath = "/wifi.txt";
 constexpr const char* kHostname = "lvgl-radio";
 constexpr const char* kAccessPointName = "LVGL-Radio-Setup";
 constexpr int32_t kRssiDisconnected = -100;
+constexpr uint32_t kInitialConnectTimeoutMs = 15000;
+constexpr uint32_t kReconnectTimeoutMs = 8000;
+constexpr uint32_t kReconnectIntervalMs = 15000;
+constexpr uint32_t kRuntimeApFallbackMs = 5UL * 60UL * 1000UL;
 
 bool readNonEmptyLine(File& file, String& result) {
   while (file.available()) {
@@ -83,7 +87,7 @@ bool WifiManager::tryConnect(const Credential& credential,
   if (!keepAccessPoint) {
     WiFi.softAPdisconnect(true);
   }
-  WiFi.disconnect(true, false);
+  WiFi.disconnect(false, false);
   WiFi.mode(keepAccessPoint ? WIFI_AP_STA : WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
@@ -109,7 +113,12 @@ bool WifiManager::tryConnect(const Credential& credential,
         WiFi.localIP() != IPAddress(static_cast<uint32_t>(0))) {
       WiFi.setSleep(false);
       WiFi.setAutoReconnect(true);
+      if (keepAccessPoint) {
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+      }
       accessPointMode_ = false;
+      disconnectedSince_ = 0;
       hasSmoothedRssi_ = false;
       Serial.printf("[wifi] IP: %s\n", WiFi.localIP().toString().c_str());
       return true;
@@ -144,30 +153,51 @@ bool WifiManager::begin() {
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   loadCredentials();
+  if (credentials_.empty()) {
+    startAccessPoint();
+    return false;
+  }
   for (const Credential& credential : credentials_) {
-    if (tryConnect(credential, 5000)) return true;
+    if (tryConnect(credential, kInitialConnectTimeoutMs)) return true;
   }
   startAccessPoint();
   return false;
 }
 
 void WifiManager::loop() {
-  if (WiFi.status() == WL_CONNECTED || credentials_.empty() || accessPointMode_) {
+  if (credentials_.empty()) {
     return;
   }
 
   const uint32_t now = millis();
-  if (now - lastReconnectAttempt_ < 10000) return;
+  if (WiFi.status() == WL_CONNECTED) {
+    disconnectedSince_ = 0;
+    if (accessPointMode_) {
+      WiFi.softAPdisconnect(true);
+      WiFi.mode(WIFI_STA);
+      accessPointMode_ = false;
+    }
+    return;
+  }
+
+  if (disconnectedSince_ == 0) {
+    disconnectedSince_ = now;
+    Serial.println("[wifi] Kapcsolat megszakadt, ujracsatlakozas varakozassal");
+  }
+
+  if (now - lastReconnectAttempt_ < kReconnectIntervalMs) return;
   lastReconnectAttempt_ = now;
   bool connectedNow = false;
   for (const Credential& credential : credentials_) {
-    if (tryConnect(credential, 3000)) {
+    if (tryConnect(credential, kReconnectTimeoutMs)) {
       connectedNow = true;
       break;
     }
   }
 
-  if (!connectedNow && !accessPointMode_) {
+  if (!connectedNow && !accessPointMode_ &&
+      now - disconnectedSince_ >= kRuntimeApFallbackMs) {
+    Serial.println("[wifi] Tartosan nincs kapcsolat, beallito AP inditasa");
     startAccessPoint();
   }
 }
