@@ -310,6 +310,10 @@
                         Show volume as graphical icon
                     </label>
                     <label class="checkbox-row">
+                        <input id="bufferBarVisible" type="checkbox">
+                        Show buffer status bar under the station name
+                    </label>
+                    <label class="checkbox-row">
                         <input id="diagnosticsVisible" type="checkbox">
                         Show diagnostics in place of the station logo
                     </label>
@@ -733,6 +737,7 @@
                 document.getElementById('headerIpVisible').checked = !!display.headerIp;
                 document.getElementById('wifiDetailsVisible').checked = !!display.wifiDetails;
                 document.getElementById('volumeGraphicVisible').checked = display.volumeGraphic !== false;
+                document.getElementById('bufferBarVisible').checked = display.bufferBar !== false;
                 document.getElementById('diagnosticsVisible').checked = !!display.diagnostics;
                 document.getElementById('albumCoversEnabled').checked = display.albumCovers !== false;
 
@@ -774,6 +779,7 @@
                 headerIp: document.getElementById('headerIpVisible').checked ? 'true' : 'false',
                 wifiDetails: document.getElementById('wifiDetailsVisible').checked ? 'true' : 'false',
                 volumeGraphic: document.getElementById('volumeGraphicVisible').checked ? 'true' : 'false',
+                bufferBar: document.getElementById('bufferBarVisible').checked ? 'true' : 'false',
                 diagnostics: document.getElementById('diagnosticsVisible').checked ? 'true' : 'false',
                 albumCovers: document.getElementById('albumCoversEnabled').checked ? 'true' : 'false',
                 weatherEnabled: document.getElementById('weatherEnabled').checked ? 'true' : 'false',
