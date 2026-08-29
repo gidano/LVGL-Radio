@@ -235,6 +235,8 @@ void RadioWebServer::registerRoutes() {
                      String(radio_.wifiDetailsVisible() ? "true" : "false") +
                      ",\"volumeGraphic\":" +
                      String(radio_.volumeGraphicVisible() ? "true" : "false") +
+                     ",\"bufferBar\":" +
+                     String(radio_.bufferBarVisible() ? "true" : "false") +
                      ",\"diagnostics\":" +
                      String(radio_.diagnosticsVisible() ? "true" : "false") +
                      ",\"albumCovers\":" +
@@ -348,6 +350,13 @@ void RadioWebServer::registerRoutes() {
     if (!volumeGraphic.isEmpty()) {
       radio_.setVolumeGraphicVisible(volumeGraphic == "true" ||
                                      volumeGraphic == "1");
+    }
+    String bufferBar = argument("bufferBar");
+    if (bufferBar.isEmpty() && !body.isEmpty())
+      bufferBar = jsonStringField(body, "bufferBar");
+    if (!bufferBar.isEmpty()) {
+      radio_.setBufferBarVisible(bufferBar == "true" ||
+                                 bufferBar == "1");
     }
     String diagnostics = argument("diagnostics");
     if (diagnostics.isEmpty() && !body.isEmpty())
@@ -473,6 +482,8 @@ void RadioWebServer::registerRoutes() {
                      String(radio_.wifiDetailsVisible() ? "true" : "false") +
                      ",\"volumeGraphic\":" +
                      String(radio_.volumeGraphicVisible() ? "true" : "false") +
+                     ",\"bufferBar\":" +
+                     String(radio_.bufferBarVisible() ? "true" : "false") +
                      ",\"diagnostics\":" +
                      String(radio_.diagnosticsVisible() ? "true" : "false") +
                      ",\"albumCovers\":" +
