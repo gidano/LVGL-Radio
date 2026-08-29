@@ -164,6 +164,7 @@ bool RadioController::begin() {
   headerIpVisible_ = preferences.getBool("ui_ip", false);
   wifiDetailsVisible_ = preferences.getBool("ui_wifi", false);
   volumeGraphicVisible_ = preferences.getBool("ui_vol", true);
+  bufferBarVisible_ = preferences.getBool("ui_buf", true);
   diagnosticsVisible_ = preferences.getBool("ui_diag", false);
   albumCoversEnabled_ = preferences.getBool("cover_on", true);
   logoManager_.setAlbumCoversEnabled(albumCoversEnabled_);
@@ -199,6 +200,7 @@ bool RadioController::begin() {
   if (!headerIpVisible_) display_.showStartupIp(10000);
   display_.setWifiDetailsVisible(wifiDetailsVisible_);
   display_.setVolumeGraphicVisible(volumeGraphicVisible_);
+  display_.setBufferBarVisible(bufferBarVisible_);
   display_.setDiagnosticsVisible(diagnosticsVisible_);
   preferences.end();
 
@@ -576,6 +578,17 @@ void RadioController::setVolumeGraphicVisible(bool visible) {
   Preferences preferences;
   preferences.begin("lvgl-radio", false);
   preferences.putBool("ui_vol", volumeGraphicVisible_);
+  preferences.end();
+}
+
+bool RadioController::bufferBarVisible() const { return bufferBarVisible_; }
+
+void RadioController::setBufferBarVisible(bool visible) {
+  bufferBarVisible_ = visible;
+  display_.setBufferBarVisible(bufferBarVisible_);
+  Preferences preferences;
+  preferences.begin("lvgl-radio", false);
+  preferences.putBool("ui_buf", bufferBarVisible_);
   preferences.end();
 }
 
