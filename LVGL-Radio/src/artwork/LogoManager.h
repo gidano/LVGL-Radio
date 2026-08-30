@@ -20,7 +20,8 @@ class LogoManager {
   void setAlbumCoversEnabled(bool enabled);
   bool albumCoversEnabled() const;
   void setAlbumTitle(const String& combinedTitle);
-  void loop(bool playbackRunning, size_t bufferFilledBytes);
+  void loop(bool playbackRunning, size_t bufferFilledBytes,
+            const String& codec = "", uint32_t bitrateKbps = 0);
 
   String currentPath() const;
   String currentSource() const;

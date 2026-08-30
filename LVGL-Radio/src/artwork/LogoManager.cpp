@@ -6,6 +6,7 @@
 #include <NetworkClient.h>
 #include <NetworkClientSecure.h>
 #include <esp_heap_caps.h>
+#include <cstring>
 #include <math.h>
 #include <new>
 
@@ -59,18 +60,99 @@ constexpr uint32_t kArtworkTaskStackBytes = 16 * 1024;
 constexpr size_t kMinimumLogoNetworkBuffer = 192 * 1024;
 constexpr size_t kMinimumConfiguredLogoBuffer = 128 * 1024;
 constexpr size_t kMinimumAlbumCoverBuffer = 48 * 1024;
-constexpr size_t kMinimumSecureAlbumCoverBuffer = 128 * 1024;
-constexpr size_t kMinimumAlbumInternalHeap = 32 * 1024;
+constexpr size_t kMinimumSecureAlbumCoverBuffer = 64 * 1024;
+constexpr size_t kMinimumDemandingAlbumCoverBuffer = 96 * 1024;
+constexpr size_t kMinimumAlbumInternalHeap = 24 * 1024;
 constexpr uint32_t kReadIdleTimeoutMs = 3500;
+constexpr size_t kMinimumTextFetchInternalHeap = 20 * 1024;
+constexpr size_t kMinimumTextReadInternalHeap = 12 * 1024;
+constexpr BaseType_t kArtworkTaskCore = 0;
+constexpr UBaseType_t kArtworkTaskPriority = 0;
 constexpr char kRadioBrowserBases[][35] = {
     "https://de1.api.radio-browser.info",
     "https://nl1.api.radio-browser.info",
 };
 
+volatile bool gAlbumNetworkPoliteMode = false;
+
 struct ImageSize {
   uint16_t width{0};
   uint16_t height{0};
 };
+
+struct PsramText {
+  char* data{nullptr};
+  size_t length{0};
+  size_t capacity{0};
+
+  ~PsramText() { clearStorage(); }
+
+  PsramText() = default;
+  PsramText(const PsramText&) = delete;
+  PsramText& operator=(const PsramText&) = delete;
+
+  void clear() {
+    length = 0;
+    if (data) data[0] = '\0';
+  }
+
+  void clearStorage() {
+    if (data) heap_caps_free(data);
+    data = nullptr;
+    length = 0;
+    capacity = 0;
+  }
+
+  bool reserve(size_t requested) {
+    if (requested + 1 <= capacity) return true;
+    size_t nextCapacity = capacity ? capacity : 2048;
+    while (nextCapacity < requested + 1) nextCapacity *= 2;
+    char* next = static_cast<char*>(
+        heap_caps_malloc(nextCapacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!next) {
+      next = static_cast<char*>(
+          heap_caps_malloc(nextCapacity, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+    if (!next) return false;
+    if (data && length) memcpy(next, data, length);
+    if (data) heap_caps_free(data);
+    data = next;
+    capacity = nextCapacity;
+    data[length] = '\0';
+    return true;
+  }
+
+  bool append(const uint8_t* bytes, size_t count) {
+    if (!bytes || !count) return true;
+    if (!reserve(length + count)) return false;
+    memcpy(data + length, bytes, count);
+    length += count;
+    data[length] = '\0';
+    return true;
+  }
+
+  bool empty() const { return length == 0; }
+  const char* c_str() const { return data ? data : ""; }
+};
+
+struct ScopedAlbumNetworkPoliteMode {
+  explicit ScopedAlbumNetworkPoliteMode(bool enabled)
+      : previous(gAlbumNetworkPoliteMode) {
+    if (enabled) gAlbumNetworkPoliteMode = true;
+  }
+
+  ~ScopedAlbumNetworkPoliteMode() { gAlbumNetworkPoliteMode = previous; }
+
+  bool previous;
+};
+
+bool demandingAudioStream(String codec, uint32_t bitrateKbps) {
+  codec.toUpperCase();
+  return bitrateKbps >= 256 || codec.indexOf("FLAC") >= 0 ||
+         codec.indexOf("OGG") >= 0 || codec.indexOf("VORBIS") >= 0;
+}
+
+uint32_t artworkNetworkDelayMs() { return gAlbumNetworkPoliteMode ? 4 : 1; }
 
 uint32_t fnv1a(const String& value) {
   uint32_t hash = 2166136261UL;
@@ -322,9 +404,32 @@ String urlEncode(String value) {
   return encoded;
 }
 
-bool fetchText(const String& fetchUrl, String& body) {
-  constexpr size_t kMaximumTextResponseBytes = 96 * 1024;
+int findInText(const char* text, size_t length, const char* needle,
+               size_t startAt = 0) {
+  if (!text || !needle || startAt >= length) return -1;
+  const size_t needleLength = strlen(needle);
+  if (!needleLength || needleLength > length - startAt) return -1;
+  for (size_t index = startAt; index + needleLength <= length; ++index) {
+    if (memcmp(text + index, needle, needleLength) == 0)
+      return static_cast<int>(index);
+  }
+  return -1;
+}
+
+bool fetchText(const String& fetchUrl, PsramText& body) {
+  constexpr size_t kMaximumTextResponseBytes = 48 * 1024;
   constexpr uint32_t kTextReadIdleTimeoutMs = 4500;
+  const size_t freeInternalHeap =
+      heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  const size_t largestInternalBlock =
+      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (freeInternalHeap < kMinimumTextFetchInternalHeap ||
+      largestInternalBlock < kMinimumTextFetchInternalHeap / 2) {
+    Serial.printf("[cover] API keresés kihagyva: keves belso heap %u/%u byte\n",
+                  static_cast<unsigned>(freeInternalHeap),
+                  static_cast<unsigned>(kMinimumTextFetchInternalHeap));
+    return false;
+  }
   HTTPClient http;
   NetworkClient plainClient;
   NetworkClientSecure secureClient;
@@ -353,8 +458,14 @@ bool fetchText(const String& fetchUrl, String& body) {
     return false;
   }
 
-  body = "";
-  body.reserve(declaredLength > 0 ? min<size_t>(declaredLength, 8192) : 2048);
+  body.clear();
+  const size_t reserveBytes =
+      declaredLength > 0 ? min<size_t>(declaredLength, 4096) : 2048;
+  if (!body.reserve(reserveBytes)) {
+    Serial.println("[cover] API valasz buffer foglalasi hiba");
+    http.end();
+    return false;
+  }
   NetworkClient* stream = http.getStreamPtr();
   uint8_t buffer[512];
   size_t receivedTotal = 0;
@@ -371,7 +482,8 @@ bool fetchText(const String& fetchUrl, String& body) {
       vTaskDelay(1);
       continue;
     }
-    size_t requested = min(available, sizeof(buffer));
+    const size_t chunkLimit = gAlbumNetworkPoliteMode ? 256 : sizeof(buffer);
+    size_t requested = min(available, chunkLimit);
     if (declaredLength > 0) {
       requested =
           min(requested,
@@ -382,11 +494,23 @@ bool fetchText(const String& fetchUrl, String& body) {
     if (receivedTotal + static_cast<size_t>(received) >
         kMaximumTextResponseBytes) {
       Serial.println("[cover] API valasz limit tulcsordult");
-      body = "";
+      body.clear();
       break;
     }
-    body.concat(reinterpret_cast<const char*>(buffer),
-                static_cast<unsigned int>(received));
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) <
+        kMinimumTextReadInternalHeap) {
+      Serial.printf("[cover] API olvasas leallitva: keves belso heap %u/%u byte\n",
+                    static_cast<unsigned>(heap_caps_get_free_size(
+                        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                    static_cast<unsigned>(kMinimumTextReadInternalHeap));
+      body.clear();
+      break;
+    }
+    if (!body.append(buffer, static_cast<size_t>(received))) {
+      Serial.println("[cover] API valasz buffer bovitesi hiba");
+      body.clear();
+      break;
+    }
     receivedTotal += static_cast<size_t>(received);
     lastReadAt = millis();
     vTaskDelay(1);
@@ -397,7 +521,7 @@ bool fetchText(const String& fetchUrl, String& body) {
     Serial.printf("[cover] rovid API valasz: %u/%d byte\n",
                   static_cast<unsigned>(receivedTotal), declaredLength);
   }
-  return !body.isEmpty();
+  return !body.empty();
 }
 
 String jsonUnescape(String value) {
@@ -410,27 +534,30 @@ String jsonUnescape(String value) {
   return value;
 }
 
-String extractJsonStringField(const String& json, const char* fieldName) {
-  const String needle = String("\"") + fieldName + "\"";
+String extractJsonStringField(const char* json, size_t jsonLength,
+                              const char* fieldName, size_t startAt = 0) {
+  char needle[80];
+  snprintf(needle, sizeof(needle), "\"%s\"", fieldName);
   size_t searchFrom = 0;
+  searchFrom = startAt;
   while (true) {
-    const int index = json.indexOf(needle, searchFrom);
+    const int index = findInText(json, jsonLength, needle, searchFrom);
     if (index < 0) return "";
-    size_t cursor = static_cast<size_t>(index) + needle.length();
-    while (cursor < json.length() &&
+    size_t cursor = static_cast<size_t>(index) + strlen(needle);
+    while (cursor < jsonLength &&
            isspace(static_cast<unsigned char>(json[cursor]))) {
       ++cursor;
     }
-    if (cursor >= json.length() || json[cursor] != ':') {
-      searchFrom = static_cast<size_t>(index) + needle.length();
+    if (cursor >= jsonLength || json[cursor] != ':') {
+      searchFrom = static_cast<size_t>(index) + strlen(needle);
       continue;
     }
     ++cursor;
-    while (cursor < json.length() &&
+    while (cursor < jsonLength &&
            isspace(static_cast<unsigned char>(json[cursor]))) {
       ++cursor;
     }
-    if (cursor >= json.length()) return "";
+    if (cursor >= jsonLength) return "";
     if (json[cursor] == 'n') {
       return "";
     }
@@ -441,7 +568,7 @@ String extractJsonStringField(const String& json, const char* fieldName) {
     ++cursor;
     String value;
     bool escaped = false;
-    while (cursor < json.length()) {
+    while (cursor < jsonLength) {
       const char character = json[cursor++];
       if (escaped) {
         value += character;
@@ -459,16 +586,18 @@ String extractJsonStringField(const String& json, const char* fieldName) {
   }
 }
 
-void collectJsonStringFields(const String& json, const char* fieldName,
+void collectJsonStringFields(const char* json, size_t jsonLength,
+                             const char* fieldName,
                              std::vector<String>& values,
                              uint8_t maximum = 8) {
-  const String needle = String("\"") + fieldName + "\"";
+  char needle[80];
+  snprintf(needle, sizeof(needle), "\"%s\"", fieldName);
   size_t searchFrom = 0;
   while (values.size() < maximum) {
-    const int index = json.indexOf(needle, searchFrom);
+    const int index = findInText(json, jsonLength, needle, searchFrom);
     if (index < 0) return;
-    const String value = extractJsonStringField(json.substring(index),
-                                                fieldName);
+    const String value =
+        extractJsonStringField(json, jsonLength, fieldName, index);
     if (!value.isEmpty()) {
       bool duplicate = false;
       for (const String& existing : values) {
@@ -479,7 +608,7 @@ void collectJsonStringFields(const String& json, const char* fieldName,
       }
       if (!duplicate) values.push_back(value);
     }
-    searchFrom = static_cast<size_t>(index) + needle.length();
+    searchFrom = static_cast<size_t>(index) + strlen(needle);
   }
 }
 
@@ -509,9 +638,10 @@ String radioBrowserFaviconForStream(const String& streamUrl) {
     for (const char* host : kRadioBrowserBases) {
       const String url = String(host) + "/json/stations/byurl?url=" +
                          urlEncode(base);
-      String json;
+      PsramText json;
       if (!fetchText(url, json)) continue;
-      const String favicon = extractJsonStringField(json, "favicon");
+      const String favicon =
+          extractJsonStringField(json.c_str(), json.length, "favicon");
       if (!favicon.isEmpty()) return favicon;
     }
   }
@@ -581,20 +711,26 @@ String albumCoverKey(const String& artist, const String& title) {
          normalizedCoverPart(title);
 }
 
-String extractFieldAfter(const String& json, const String& marker,
-                         const char* fieldName) {
-  const int markerAt = marker.isEmpty() ? 0 : json.indexOf(marker);
+String extractFieldAfter(const PsramText& json, const char* marker,
+                         const char* fieldName, size_t startAt = 0) {
+  const int markerAt =
+      !marker || !marker[0] ? static_cast<int>(startAt)
+                            : findInText(json.c_str(), json.length, marker,
+                                         startAt);
   if (markerAt < 0) return "";
-  return extractJsonStringField(json.substring(markerAt), fieldName);
+  return extractJsonStringField(json.c_str(), json.length, fieldName,
+                                static_cast<size_t>(markerAt));
 }
 
-bool extractFirstReleaseGroupMbid(const String& json, String& mbid,
+bool extractFirstReleaseGroupMbid(const PsramText& json, String& mbid,
                                   size_t startAt) {
   size_t cursor = startAt;
-  while (cursor < json.length()) {
-    const int rgAt = json.indexOf("\"release-group\"", cursor);
+  while (cursor < json.length) {
+    const int rgAt =
+        findInText(json.c_str(), json.length, "\"release-group\"", cursor);
     if (rgAt < 0) return false;
-    const String candidate = extractFieldAfter(json.substring(rgAt), "", "id");
+    const String candidate =
+        extractFieldAfter(json, "", "id", static_cast<size_t>(rgAt));
     if (isValidMbid(candidate)) {
       mbid = candidate;
       return true;
@@ -621,7 +757,7 @@ bool findMusicBrainzReleaseGroupCovers(const String& artist,
   query += artist;
   query += "\"";
 
-  String json;
+  PsramText json;
   String url =
       "http://musicbrainz.org/ws/2/recording/?fmt=json&limit=5&query=" +
       urlEncode(query);
@@ -634,7 +770,10 @@ bool findMusicBrainzReleaseGroupCovers(const String& artist,
   for (uint8_t attempts = 0; attempts < 6; ++attempts) {
     String mbid;
     if (!extractFirstReleaseGroupMbid(json, mbid, cursor)) break;
-    cursor = static_cast<size_t>(json.indexOf(mbid)) + mbid.length();
+    const int mbidAt = findInText(json.c_str(), json.length, mbid.c_str(),
+                                  cursor);
+    cursor = (mbidAt >= 0 ? static_cast<size_t>(mbidAt) : cursor) +
+             mbid.length();
     bool duplicate = false;
     for (const String& coverUrl : coverUrls) {
       if (coverUrl.indexOf(mbid) >= 0) {
@@ -664,10 +803,11 @@ bool findLastFmReleaseCover(const String& artist, const String& title,
   url += "&track=";
   url += urlEncode(title);
 
-  String json;
+  PsramText json;
   if (!fetchText(url, json)) return false;
-  const String albumJson = json.substring(max(0, json.indexOf("\"album\"")));
-  const String mbid = extractJsonStringField(albumJson, "mbid");
+  const int albumAt = findInText(json.c_str(), json.length, "\"album\"");
+  const String mbid = extractJsonStringField(
+      json.c_str(), json.length, "mbid", albumAt >= 0 ? albumAt : 0);
   if (!isValidMbid(mbid)) return false;
   coverUrl = "http://coverartarchive.org/release/" + mbid + "/front-250";
   return true;
@@ -690,14 +830,14 @@ bool findLastFmCoverCandidates(const String& artist, const String& title,
   url += "&track=";
   url += urlEncode(title);
 
-  String json;
+  PsramText json;
   if (!fetchText(url, json)) {
     Serial.println("[cover] Last.fm HTTP hiba");
     return false;
   }
 
   std::vector<String> images;
-  collectJsonStringFields(json, "#text", images, 10);
+  collectJsonStringFields(json.c_str(), json.length, "#text", images, 10);
   for (int index = static_cast<int>(images.size()) - 1; index >= 0; --index) {
     if (images[index].startsWith("http://") ||
         images[index].startsWith("https://")) {
@@ -706,8 +846,9 @@ bool findLastFmCoverCandidates(const String& artist, const String& title,
     }
   }
 
-  const String albumJson = json.substring(max(0, json.indexOf("\"album\"")));
-  const String mbid = extractJsonStringField(albumJson, "mbid");
+  const int albumAt = findInText(json.c_str(), json.length, "\"album\"");
+  const String mbid = extractJsonStringField(
+      json.c_str(), json.length, "mbid", albumAt >= 0 ? albumAt : 0);
   if (isValidMbid(mbid)) {
     appendUnique(coverUrls,
                  "http://coverartarchive.org/release/" + mbid + "/front-250");
@@ -732,13 +873,14 @@ bool findItunesCoverCandidates(const String& artist, const String& title,
   const String url =
       "https://itunes.apple.com/search?media=music&entity=song&limit=5&term=" +
       urlEncode(query);
-  String json;
+  PsramText json;
   if (!fetchText(url, json)) {
     Serial.println("[cover] iTunes HTTP hiba");
     return false;
   }
   std::vector<String> images;
-  collectJsonStringFields(json, "artworkUrl100", images, 8);
+  collectJsonStringFields(json.c_str(), json.length, "artworkUrl100", images,
+                          8);
   const size_t before = coverUrls.size();
   for (const String& image : images) {
     appendUnique(coverUrls, upgradedItunesArtwork(image));
@@ -757,16 +899,17 @@ bool findDeezerCoverCandidates(const String& artist, const String& title,
   query += "\"";
   const String url =
       "https://api.deezer.com/search/track?limit=5&q=" + urlEncode(query);
-  String json;
+  PsramText json;
   if (!fetchText(url, json)) {
     Serial.println("[cover] Deezer HTTP hiba");
     return false;
   }
   const size_t before = coverUrls.size();
   std::vector<String> images;
-  collectJsonStringFields(json, "cover_xl", images, 8);
-  collectJsonStringFields(json, "cover_big", images, 8);
-  collectJsonStringFields(json, "cover_medium", images, 8);
+  collectJsonStringFields(json.c_str(), json.length, "cover_xl", images, 8);
+  collectJsonStringFields(json.c_str(), json.length, "cover_big", images, 8);
+  collectJsonStringFields(json.c_str(), json.length, "cover_medium", images,
+                          8);
   for (const String& image : images) appendUnique(coverUrls, image);
   Serial.printf("[cover] Deezer jeloltek: %u\n",
                 static_cast<unsigned>(coverUrls.size() - before));
@@ -881,6 +1024,7 @@ bool LogoManager::downloadAlbumCover(const String& combinedTitle,
                                      const String& key,
                                      String& imagePath,
                                      String& thumbnail) {
+  ScopedAlbumNetworkPoliteMode politeNetwork(true);
   String artist;
   String title;
   if (!splitCombinedTitle(combinedTitle, artist, title)) return false;
@@ -1113,7 +1257,8 @@ void LogoManager::setAlbumTitle(const String& combinedTitle) {
 #endif
 }
 
-void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
+void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes,
+                       const String& codec, uint32_t bitrateKbps) {
   processResult();
 
   if (currentPath_.isEmpty() || !LittleFS.exists(currentPath_)) {
@@ -1163,9 +1308,11 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
                                 ? kMinimumConfiguredLogoBuffer
                                 : kMinimumLogoNetworkBuffer);
   const bool secureAudioStream = streamUrl_.startsWith("https://");
+  const bool demandingStream = demandingAudioStream(codec, bitrateKbps);
   const size_t albumBufferTarget =
-      secureAudioStream ? kMinimumSecureAlbumCoverBuffer
-                        : kMinimumAlbumCoverBuffer;
+      demandingStream ? kMinimumDemandingAlbumCoverBuffer
+                      : (secureAudioStream ? kMinimumSecureAlbumCoverBuffer
+                                           : kMinimumAlbumCoverBuffer);
   const bool safeForAlbumCover =
       !playbackRunning || bufferFilledBytes >= albumBufferTarget;
 
@@ -1195,7 +1342,8 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
                       static_cast<unsigned>(bufferFilledBytes),
                       static_cast<unsigned>(albumBufferTarget),
                       albumTitle_.c_str());
-        markSourceFailed(albumKey_);
+        albumRequestedAt_ = now;
+        albumStatusLoggedAt_ = now;
         return false;
       }
       if (!albumStatusLoggedAt_ ||
@@ -1215,7 +1363,8 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes) {
                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
                       static_cast<unsigned>(kMinimumAlbumInternalHeap),
                       albumTitle_.c_str());
-        markSourceFailed(albumKey_);
+        albumRequestedAt_ = now;
+        albumStatusLoggedAt_ = now;
         return false;
       }
       if (!albumStatusLoggedAt_ ||
@@ -1442,7 +1591,8 @@ bool LogoManager::startJob(JobKind kind, const String& source,
       break;
   }
   if (xTaskCreatePinnedToCore(taskEntry, "logo", kArtworkTaskStackBytes, job,
-                              0, &task_, 0) != pdPASS) {
+                              kArtworkTaskPriority, &task_,
+                              kArtworkTaskCore) != pdPASS) {
     task_ = nullptr;
     delete job;
     return false;
@@ -1807,10 +1957,11 @@ bool LogoManager::downloadAttempt(const String& fetchUrl, const String& key,
     const size_t available = stream->available();
     if (!available) {
       if (millis() - lastReadAt > kReadIdleTimeoutMs) break;
-      vTaskDelay(1);
+      vTaskDelay(pdMS_TO_TICKS(artworkNetworkDelayMs()));
       continue;
     }
-    size_t requested = min(available, sizeof(buffer));
+    const size_t chunkLimit = gAlbumNetworkPoliteMode ? 384 : sizeof(buffer);
+    size_t requested = min(available, chunkLimit);
     if (declaredLength > 0)
       requested =
           min(requested, static_cast<size_t>(declaredLength) - written);
@@ -1821,7 +1972,7 @@ bool LogoManager::downloadAttempt(const String& fetchUrl, const String& key,
     written += received;
     lastReadAt = millis();
     if (written > kMaximumArtworkBytes) break;
-    vTaskDelay(1);
+    vTaskDelay(pdMS_TO_TICKS(artworkNetworkDelayMs()));
   }
   output.flush();
   output.close();
@@ -2152,12 +2303,13 @@ bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
       pixels[dst] = static_cast<uint8_t>(color >> 8);
       pixels[dst + 1] = static_cast<uint8_t>(color);
     }
+    if ((y & 0x0F) == 0x0F) vTaskDelay(1);
   }
   stbi_image_free(rgba);
 
   if (!hasVisiblePixels(pixels,
                         static_cast<size_t>(kThumbnailSize) * kThumbnailSize)) {
-    free(pixels);
+    heap_caps_free(pixels);
     return false;
   }
 
@@ -2165,7 +2317,7 @@ bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
   if (LittleFS.exists(temporary)) LittleFS.remove(temporary);
   File output = LittleFS.open(temporary, FILE_WRITE);
   if (!output) {
-    free(pixels);
+    heap_caps_free(pixels);
     return false;
   }
   const uint8_t header[8] = {
@@ -2185,7 +2337,7 @@ bool LogoManager::makeThumbnail(const String& imagePath, const String& key,
   }
   output.flush();
   output.close();
-  free(pixels);
+  heap_caps_free(pixels);
   if (!success) {
     LittleFS.remove(temporary);
     return false;
