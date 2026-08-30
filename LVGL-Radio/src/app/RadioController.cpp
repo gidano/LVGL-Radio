@@ -286,8 +286,10 @@ void RadioController::loop() {
         logoManager_.setEmbeddedImage(currentPlayUrl_, segments);
       }
     }
-    logoManager_.setAlbumTitle(audioSnapshot().streamTitle);
-    logoManager_.loop(running, bufferFilled);
+    const AudioSnapshot snapshot = audioSnapshot();
+    logoManager_.setAlbumTitle(snapshot.streamTitle);
+    logoManager_.loop(running, bufferFilled, snapshot.codec,
+                      snapshot.bitrateKbps);
   }
 
   if (now - lastMetadataAt_ >= kMetadataServiceMs) {
