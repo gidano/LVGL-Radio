@@ -308,11 +308,11 @@
     <div class="container">
         <h1>📻 LVGL Radio</h1>
     <p style="margin-top:-8px">
-      <a href="/upload" style="color:#7fd; text-decoration:underline;">File upload (SPIFFS)</a>
+      <a href="/upload" style="color:#7fd; text-decoration:underline; white-space:nowrap;">File upload (SPIFFS)</a>
       <span style="opacity:.6"> | </span>
-      <a href="/web/search_en.html" style="color:#7fd; text-decoration:underline;">🔎 Radio search</a>
+      <a href="/web/search_en.html" style="color:#7fd; text-decoration:underline; white-space:nowrap;">🔎 Radio search</a>
       <span style="opacity:.6"> | </span>
-      <a href="/web/settings_en.html" style="color:#7fd; text-decoration:underline;">⚙️ Settings</a>
+      <a href="/web/settings_en.html" style="color:#7fd; text-decoration:underline; white-space:nowrap;">⚙️ Settings</a>
     </p>
         
         <div class="status-bar">
@@ -348,23 +348,6 @@
     <input id="brightnessSlider" type="range" min="0" max="255" value="255" style="width:220px;">
     <span id="brightnessValue" style="min-width:36px; text-align:left; color:#bbb;">255</span>
 </div>
-
-<details style="margin-top:14px; padding:10px; border:1px solid #333; border-radius:8px; text-align:left;">
-    <summary style="cursor:pointer; color:#00e5ff;">⚙️ Settings</summary>
-    <div style="display:grid; gap:8px; margin-top:12px;">
-        <label for="timezonePreset">Time zone</label>
-        <select id="timezonePreset" class="search-box" style="margin:0;" onchange="selectTimezonePreset(this.value)">
-            <option value="CET-1CEST,M3.5.0,M10.5.0/3">Budapest / Central Europe</option>
-            <option value="GMT0BST,M3.5.0/1,M10.5.0">London</option>
-            <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Helsinki / Eastern Europe</option>
-            <option value="UTC0">UTC</option>
-            <option value="">Custom POSIX value</option>
-        </select>
-        <input id="timezoneValue" class="search-box" style="margin:0;" maxlength="96" placeholder="CET-1CEST,M3.5.0,M10.5.0/3">
-        <button class="control-btn" style="width:auto;height:42px;border-radius:10px;padding:0 16px;" onclick="saveSettings()">Save time zone</button>
-        <div id="settingsMessage" class="status" style="margin:0;"></div>
-    </div>
-</details>
 
             
             <div class="transport-row">
@@ -940,37 +923,6 @@ async function fetchBrightness() {
     }
 }
 
-function selectTimezonePreset(value) {
-    if (value) document.getElementById('timezoneValue').value = value;
-}
-
-async function fetchSettings() {
-    try {
-        const response = await fetch('/api/settings');
-        const data = await response.json();
-        const value = data.timezone || 'CET-1CEST,M3.5.0,M10.5.0/3';
-        document.getElementById('timezoneValue').value = value;
-        const preset = document.getElementById('timezonePreset');
-        const match = Array.from(preset.options).find(option => option.value === value);
-        preset.value = match ? value : '';
-    } catch (e) {
-        document.getElementById('settingsMessage').innerText = 'Could not load settings.';
-    }
-}
-
-async function saveSettings() {
-    const value = document.getElementById('timezoneValue').value.trim();
-    const message = document.getElementById('settingsMessage');
-    try {
-        const response = await fetch('/api/settings?timezone=' + encodeURIComponent(value), { method: 'POST' });
-        message.innerText = response.ok ? 'Time zone saved and applied.' : 'Invalid time zone value.';
-        if (response.ok) fetchSettings();
-    } catch (e) {
-        message.innerText = 'Could not save the setting.';
-    }
-}
-
-
         async function togglePlayPause() {
             await fetch('/api/toggle', { method: 'POST' });
             paused = !paused;
@@ -1030,7 +982,6 @@ if (br) {
     br.addEventListener('input', (e) => setBrightness(e.target.value));
 }
 fetchBrightness();
-fetchSettings();
 
 // Autómatikus frissítés
         setInterval(fetchStatus, 3000);

@@ -308,11 +308,11 @@
     <div class="container">
         <h1>📻 LVGL Radio</h1>
     <p style="margin-top:-8px">
-      <a href="/upload" style="color:#7fd; text-decoration:underline;">Fájl feltöltés (LittleFS)</a>
+      <a href="/upload" style="color:#7fd; text-decoration:underline; white-space:nowrap;">Fájl feltöltés (LittleFS)</a>
       <span style="opacity:.6"> | </span>
-      <a href="/search" style="color:#7fd; text-decoration:underline;">🔎 Rádió kereső</a>
+      <a href="/search" style="color:#7fd; text-decoration:underline; white-space:nowrap;">🔎 Rádió kereső</a>
       <span style="opacity:.6"> | </span>
-      <a href="/settings" style="color:#7fd; text-decoration:underline;">⚙️ Beállítások</a>
+      <a href="/settings" style="color:#7fd; text-decoration:underline; white-space:nowrap;">⚙️ Beállítások</a>
     </p>
         
         <div class="status-bar">
@@ -922,37 +922,6 @@ async function fetchBrightness() {
     }
 }
 
-function selectTimezonePreset(value) {
-    if (value) document.getElementById('timezoneValue').value = value;
-}
-
-async function fetchSettings() {
-    try {
-        const response = await fetch('/api/settings');
-        const data = await response.json();
-        const value = data.timezone || 'CET-1CEST,M3.5.0,M10.5.0/3';
-        document.getElementById('timezoneValue').value = value;
-        const preset = document.getElementById('timezonePreset');
-        const match = Array.from(preset.options).find(option => option.value === value);
-        preset.value = match ? value : '';
-    } catch (e) {
-        document.getElementById('settingsMessage').innerText = 'A beállítások nem tölthetők be.';
-    }
-}
-
-async function saveSettings() {
-    const value = document.getElementById('timezoneValue').value.trim();
-    const message = document.getElementById('settingsMessage');
-    try {
-        const response = await fetch('/api/settings?timezone=' + encodeURIComponent(value), { method: 'POST' });
-        message.innerText = response.ok ? 'Időzóna elmentve és alkalmazva.' : 'Hibás időzónaérték.';
-        if (response.ok) fetchSettings();
-    } catch (e) {
-        message.innerText = 'A beállítás nem menthető.';
-    }
-}
-
-
         async function togglePlayPause() {
             await fetch('/api/toggle', { method: 'POST' });
             paused = !paused;
@@ -1012,7 +981,6 @@ if (br) {
     br.addEventListener('input', (e) => setBrightness(e.target.value));
 }
 fetchBrightness();
-fetchSettings();
 
 // Autómatikus frissítés
         setInterval(fetchStatus, 3000);

@@ -308,11 +308,11 @@
     <div class="container">
         <h1>📻 LVGL Radio</h1>
     <p style="margin-top:-8px">
-      <a href="/upload" style="color:#7fd; text-decoration:underline;">Przesyłanie plików (SPIFFS)</a>
+      <a href="/upload" style="color:#7fd; text-decoration:underline; white-space:nowrap;">Przesyłanie plików (SPIFFS)</a>
       <span style="opacity:.6"> | </span>
-      <a href="/web/search_pl.html" style="color:#7fd; text-decoration:underline;">🔎 Wyszukiwanie stacji</a>
+      <a href="/web/search_pl.html" style="color:#7fd; text-decoration:underline; white-space:nowrap;">🔎 Wyszukiwanie stacji</a>
       <span style="opacity:.6"> | </span>
-      <a href="/web/settings_pl.html" style="color:#7fd; text-decoration:underline;">⚙️ Ustawienia</a>
+      <a href="/web/settings_pl.html" style="color:#7fd; text-decoration:underline; white-space:nowrap;">⚙️ Ustawienia</a>
     </p>
         
         <div class="status-bar">
@@ -348,23 +348,6 @@
     <input id="brightnessSlider" type="range" min="0" max="255" value="255" style="width:220px;">
     <span id="brightnessValue" style="min-width:36px; text-align:left; color:#bbb;">255</span>
 </div>
-
-<details style="margin-top:14px; padding:10px; border:1px solid #333; border-radius:8px; text-align:left;">
-    <summary style="cursor:pointer; color:#00e5ff;">⚙️ Ustawienia</summary>
-    <div style="display:grid; gap:8px; margin-top:12px;">
-        <label for="timezonePreset">Strefa czasowa</label>
-        <select id="timezonePreset" class="search-box" style="margin:0;" onchange="selectTimezonePreset(this.value)">
-            <option value="CET-1CEST,M3.5.0,M10.5.0/3">Budapeszt / Europa Środkowa</option>
-            <option value="GMT0BST,M3.5.0/1,M10.5.0">Londyn</option>
-            <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Helsinki / Europa Wschodnia</option>
-            <option value="UTC0">UTC</option>
-            <option value="">Własna wartość POSIX</option>
-        </select>
-        <input id="timezoneValue" class="search-box" style="margin:0;" maxlength="96" placeholder="CET-1CEST,M3.5.0,M10.5.0/3">
-        <button class="control-btn" style="width:auto;height:42px;border-radius:10px;padding:0 16px;" onclick="saveSettings()">Zapisz strefę czasową</button>
-        <div id="settingsMessage" class="status" style="margin:0;"></div>
-    </div>
-</details>
 
             
             <div class="transport-row">
@@ -940,37 +923,6 @@ async function fetchJasność() {
     }
 }
 
-function selectTimezonePreset(value) {
-    if (value) document.getElementById('timezoneValue').value = value;
-}
-
-async function fetchSettings() {
-    try {
-        const response = await fetch('/api/settings');
-        const data = await response.json();
-        const value = data.timezone || 'CET-1CEST,M3.5.0,M10.5.0/3';
-        document.getElementById('timezoneValue').value = value;
-        const preset = document.getElementById('timezonePreset');
-        const match = Array.from(preset.options).find(option => option.value === value);
-        preset.value = match ? value : '';
-    } catch (e) {
-        document.getElementById('settingsMessage').innerText = 'Nie można wczytać ustawień.';
-    }
-}
-
-async function saveSettings() {
-    const value = document.getElementById('timezoneValue').value.trim();
-    const message = document.getElementById('settingsMessage');
-    try {
-        const response = await fetch('/api/settings?timezone=' + encodeURIComponent(value), { method: 'POST' });
-        message.innerText = response.ok ? 'Strefa czasowa zapisana i zastosowana.' : 'Nieprawidłowa strefa czasowa.';
-        if (response.ok) fetchSettings();
-    } catch (e) {
-        message.innerText = 'Nie można zapisać ustawienia.';
-    }
-}
-
-
         async function togglePlayPause() {
             await fetch('/api/toggle', { method: 'POST' });
             paused = !paused;
@@ -1030,7 +982,6 @@ if (br) {
     br.addEventListener('input', (e) => setJasność(e.target.value));
 }
 fetchJasność();
-fetchSettings();
 
 // Autómatikus frissítés
         setInterval(fetchStatus, 3000);
