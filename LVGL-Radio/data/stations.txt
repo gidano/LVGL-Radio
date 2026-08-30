@@ -6,11 +6,11 @@
 181.FM GOOD TIME OLDIES	https://listen.181fm.com/181-goodtime_128k.mp3	https://player.181fm.com/configs/images/181fm.png
 181.FM HIGHWAY	https://listen.181fm.com/181-highway_128k.mp3	https://player.181fm.com/configs/images/181fm.png
 AIDA RADIO	https://cdn05.radio.cloud:8128/AIDA-OMNIA-GAI	aidaradio
-AMSTERDAM FUNK CH.	https://stream.afc.fm/index.html	afc
-BDPST ROCK	https://bdpstrock.hu/live.mp3	bdpstrock
-BDPST ROCK (HI-FI)	http://s2.audiostream.hu:8091/bdpstrock_FLAC	bdpstrock
+AMSTERDAM FUNK CH.	https://stream.afc.fm/index.html	https://www.afc.fm/wp-content/uploads/2023/12/afcfm.png
+BDPST ROCK	https://bdpstrock.hu/live.mp3	https://bdpstrock.hu/APPLIKACIO/BRL_500X500.png
+BDPST ROCK (HI-FI)	http://s2.audiostream.hu:8091/bdpstrock_FLAC	https://bdpstrock.hu/APPLIKACIO/BRL_500X500.png
 BEST OF ROCK.FM ACDC	https://bestofrockfm.stream.vip/acdc/mp3-256/bestofrock.fm/	bestofrockfm
-BIAS RÁDIÓ	https://admin.biasradio.com/radio/8000/live	bias_radio
+BIAS RÁDIÓ	https://admin.biasradio.com/radio/8000/live	https://biasradio.com/assets/icon.png
 BITHANG YOO RÁDIÓ	https://s03.diazol.hu:35162/stream	bithang_yoo
 BLUES WAVE	https://blueswave.radio:8000/blueswave	blueswave
 CLASSIC FM UK	http://ice-the.musicradio.com/ClassicFMMP3	http://www.classicfm.com/assets_v4r/classic/img/favicon-196x196.png
@@ -39,9 +39,8 @@ KLUBRÁDIÓ	https://stream.klubradio.hu:8443/bpstream	klubradio
 KOSSUTH RÁDIÓ	https://icast.connectmedia.hu/4726/mr1ex.mp3	kossuth
 LA GROSSE RADIO REGGAE	https://hd.lagrosseradio.info/lagrosseradio-reggae-192.mp3	lagrosse
 LAPFOX (128 VOR)	https://radio.lapfoxradio.com/radio/8000/stream-ogg-128.ogg	lapfox
-LAZA RÁDIÓ	https://stream.lazaradio.com/live.aac	lazaradio
+LAZA RÁDIÓ	http://stream.lazaradio.com/	lazaradio
 LUXFUNK	https://luxfunkbroadcast.com:443/proxy/luxfunkradio/stream	luxfunk
-MAGIC DISCO	http://live2.magicdiscoradio.com:4420/	magicdisco
 MANGORADIO - LAUT.FM	https://mangoradio.stream.laut.fm/mangoradio	mangoradio
 MEGADANCE	http://gamershouse.hu:8000/livemega.mp3	megadance
 NEXT FM	https://stream.nextfm.hu/radio/8000/nextfmhu.mp3	nextfm
@@ -84,5 +83,5 @@ WDWH-ROOTS OF ROCK	http://s4.voscast.com:8950/stream	https://www.voscast.com/ima
 YOUVENTUS RÁDIÓ	http://s2.audiostream.hu/juventus_192k	youventus
 YOUVENTUS RÁDIÓ (HI-FI)	http://s2.audiostream.hu:8090/juventus_FLAC	youventus
 ZEBRÁDIÓ	https://stream.zebradio.hu:8443/zebradio	zebradio
-ZENO FM DIRE STRAITS RADIO	http://stream.zeno.fm/bvgq21uu1zhvv	zeno_fm
+ZENO FM DIRE STRAITS	http://stream.zeno.fm/bvgq21uu1zhvv	zeno_fm
 ZZ TOP	https://2.mystreaming.net/er-app/zztop/icecast.audio	https://static2.mytuner.mobi/media/tvos_radios/jueykda5xdel.png
