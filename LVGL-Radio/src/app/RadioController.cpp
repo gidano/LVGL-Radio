@@ -289,7 +289,7 @@ void RadioController::loop() {
     const AudioSnapshot snapshot = audioSnapshot();
     logoManager_.setAlbumTitle(snapshot.streamTitle);
     logoManager_.loop(running, bufferFilled, snapshot.codec,
-                      snapshot.bitrateKbps);
+                      snapshot.bitrateKbps, snapshot.bufferPercent);
   }
 
   if (now - lastMetadataAt_ >= kMetadataServiceMs) {
