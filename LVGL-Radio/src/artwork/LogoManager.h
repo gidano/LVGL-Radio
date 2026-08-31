@@ -21,7 +21,8 @@ class LogoManager {
   bool albumCoversEnabled() const;
   void setAlbumTitle(const String& combinedTitle);
   void loop(bool playbackRunning, size_t bufferFilledBytes,
-            const String& codec = "", uint32_t bitrateKbps = 0);
+            const String& codec = "", uint32_t bitrateKbps = 0,
+            uint8_t bufferPercent = 0);
 
   String currentPath() const;
   String currentSource() const;
@@ -47,6 +48,7 @@ class LogoManager {
     String localPath;
     String homepage;
     uint32_t selectionId{0};
+    bool conservativeAlbumDownload{false};
     std::vector<uint32_t> segments;
   };
 
@@ -78,7 +80,8 @@ class LogoManager {
   static bool downloadAlbumCover(const String& combinedTitle,
                                  const String& key,
                                  String& imagePath,
-                                 String& thumbnail);
+                                 String& thumbnail,
+                                 bool conservativeMode = false);
   static String resolveRelativeUrl(String value, const String& baseUrl);
   static bool downloadAttempt(const String& fetchUrl, const String& key,
                               String& imagePath);
@@ -117,8 +120,10 @@ class LogoManager {
   String albumTitle_;
   String albumKey_;
   bool albumCoversEnabled_{true};
+  bool albumConservativeDownload_{false};
   uint32_t albumRequestedAt_{0};
   uint32_t albumStatusLoggedAt_{0};
+  uint32_t albumRetryAfter_{0};
   String pendingAlbumPurgeKey_;
   String selectedSource_;
   String radioBrowserKey_;
