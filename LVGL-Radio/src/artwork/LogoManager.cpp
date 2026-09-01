@@ -1391,7 +1391,6 @@ void LogoManager::loop(bool playbackRunning, size_t bufferFilledBytes,
     startJob(JobKind::BrowserImport, source, "", path);
     return;
   }
-
   if ((stationSource_ == "nologo" || stationSource_.isEmpty()) &&
       LittleFS.exists("/logos/nologo.png")) {
     String noLogoThumbnail;
