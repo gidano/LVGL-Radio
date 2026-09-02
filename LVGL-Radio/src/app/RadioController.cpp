@@ -17,10 +17,24 @@ constexpr uint32_t kArtworkServiceMs = 250;
 constexpr uint32_t kMetadataServiceMs = 1000;
 constexpr uint32_t kWifiServiceMs = 100;
 constexpr uint32_t kWebServiceMs = 25;
+constexpr uint32_t kStreamInitialGraceMs = 20000;
+constexpr uint32_t kStreamStallRecoverMs = 12000;
+constexpr uint32_t kStreamRecoveryCooldownMs = 30000;
 constexpr uint32_t kClockTtsMaxActiveMs = 12000;
 constexpr uint32_t kClockTtsNoProgressMs = 3500;
 constexpr uint32_t kClockTtsFadeDownStepMs = 180;
 constexpr uint32_t kClockTtsFadeUpStepMs = 180;
+
+String preferPlainHttpAudioUrl(String url) {
+  url.trim();
+  String lower = url;
+  lower.toLowerCase();
+  if (lower.startsWith("https://icast.connectmedia.hu/") ||
+      lower.startsWith("https://mr-stream.connectmedia.hu/")) {
+    return "http://" + url.substring(8);
+  }
+  return url;
+}
 
 bool isClockTtsSupportedLanguage(const String& language) {
   return language == "EN" || language == "HU" || language == "PL" ||
@@ -292,7 +306,7 @@ void RadioController::loop() {
                       snapshot.bitrateKbps, snapshot.bufferPercent);
   }
 
-  if (now - lastMetadataAt_ >= kMetadataServiceMs) {
+  if (!logoManager_.busy() && now - lastMetadataAt_ >= kMetadataServiceMs) {
     lastMetadataAt_ = now;
     metadata_.loop(wifiConnected, running, bufferFilled);
   }
@@ -314,8 +328,13 @@ void RadioController::loop() {
 
   processClockTts(now);
 
-  if (!clockTtsActive_ && audio_.consumeEndOfFile() && playlist_.active()) {
-    stepTrack(1);
+  if (!clockTtsActive_ && audio_.consumeEndOfFile()) {
+    if (playlist_.active()) {
+      stepTrack(1);
+    } else if (wifiConnected && stationStore_.count() > 0) {
+      Serial.println("[radio] Elo stream vege, ujracsatlakozas");
+      connectCurrentStation();
+    }
   }
 
   if (connectRetryPending_ && wifiConnected &&
@@ -324,6 +343,7 @@ void RadioController::loop() {
     Serial.println("[radio] M3U kapcsolat ujraprobalasa");
     connectCurrentStation();
   }
+  recoverStalledStream(now, wifiConnected, running, bufferFilled);
   if (volumeSavePending_ && now - volumeChangedAt_ >= 1000) {
     Preferences preferences;
     preferences.begin("lvgl-radio", false);
@@ -433,6 +453,40 @@ bool RadioController::togglePause() {
     return connectCurrentStation();
   }
   return audio_.togglePause();
+}
+
+void RadioController::recoverStalledStream(uint32_t now, bool wifiConnected,
+                                           bool running,
+                                           size_t bufferFilled) {
+  if (!wifiConnected || audio_.paused() || clockTtsActive_ ||
+      clockTtsFadingDown_ || clockTtsFadingUp_ || connectRetryPending_ ||
+      currentPlayUrl_.isEmpty() || stationStore_.count() == 0) {
+    return;
+  }
+
+  if (bufferFilled > 0) {
+    lastAudioDataAt_ = now;
+    return;
+  }
+
+  if (!lastAudioDataAt_) lastAudioDataAt_ = now;
+
+  const uint32_t stallLimit =
+      running ? kStreamStallRecoverMs : kStreamInitialGraceMs;
+  if (now - lastAudioDataAt_ < stallLimit) return;
+  if (lastStreamRecoveryAt_ &&
+      now - lastStreamRecoveryAt_ < kStreamRecoveryCooldownMs) {
+    return;
+  }
+
+  lastStreamRecoveryAt_ = now;
+  lastAudioDataAt_ = now;
+  Serial.printf("[radio] Stream nem ad adatot %lu ms ota, ujrainditas: %s\n",
+                static_cast<unsigned long>(stallLimit),
+                currentPlayUrl_.c_str());
+  audio_.stop();
+  delay(150);
+  connectCurrentStation();
 }
 
 void RadioController::setVolume(uint8_t value) {
@@ -1111,8 +1165,13 @@ bool RadioController::connectCurrentStation() {
     nextConnectRetryAt_ = millis() + kConnectRetryMs;
     return false;
   }
-  currentPlayUrl_ = resolvedUrl;
+  currentPlayUrl_ = preferPlainHttpAudioUrl(resolvedUrl);
+  if (currentPlayUrl_ != resolvedUrl) {
+    Serial.printf("[radio] Audio TLS kihagyva ismert streamnel: %s\n",
+                  currentPlayUrl_.c_str());
+  }
   playlistTitle_ = title;
+  lastAudioDataAt_ = millis();
   logoManager_.selectStation(station->logoName, currentPlayUrl_,
                              station->homepage, station->name);
   const bool queued = audio_.connect(currentPlayUrl_);
@@ -1125,8 +1184,13 @@ bool RadioController::stepTrack(int delta) {
   String resolvedUrl;
   String title;
   if (!playlist_.step(delta, resolvedUrl, title)) return false;
-  currentPlayUrl_ = resolvedUrl;
+  currentPlayUrl_ = preferPlainHttpAudioUrl(resolvedUrl);
+  if (currentPlayUrl_ != resolvedUrl) {
+    Serial.printf("[radio] Audio TLS kihagyva ismert streamnel: %s\n",
+                  currentPlayUrl_.c_str());
+  }
   playlistTitle_ = title;
+  lastAudioDataAt_ = millis();
   const Station* station = currentStation();
   metadata_.selectStation(station);
   logoManager_.selectStation(station ? station->logoName : String("nologo"),

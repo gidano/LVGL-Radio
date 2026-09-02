@@ -74,6 +74,8 @@ class RadioController {
   void setWifiDetailsVisible(bool visible);
   bool volumeGraphicVisible() const;
   void setVolumeGraphicVisible(bool visible);
+  bool bufferBarVisible() const;
+  void setBufferBarVisible(bool visible);
   bool diagnosticsVisible() const;
   void setDiagnosticsVisible(bool visible);
   bool albumCoversEnabled() const;
@@ -125,6 +127,8 @@ class RadioController {
   bool connectCurrentStation();
   bool stepTrack(int delta);
   void cycleWeatherMode();
+  void recoverStalledStream(uint32_t now, bool wifiConnected, bool running,
+                            size_t bufferFilled);
   void processClockTts(uint32_t now);
   void resetClockTtsPlayback(bool restoreVolume);
   bool beginClockTtsAnnouncement(const String& text, const String& language,
@@ -156,6 +160,7 @@ class RadioController {
   bool headerIpVisible_{false};
   bool wifiDetailsVisible_{false};
   bool volumeGraphicVisible_{true};
+  bool bufferBarVisible_{true};
   bool diagnosticsVisible_{false};
   bool albumCoversEnabled_{true};
   WeatherService weather_;
@@ -180,6 +185,8 @@ class RadioController {
   uint32_t lastMetadataAt_{0};
   uint32_t lastWifiLoopAt_{0};
   uint32_t lastWebLoopAt_{0};
+  uint32_t lastAudioDataAt_{0};
+  uint32_t lastStreamRecoveryAt_{0};
   int clockTtsPreviousVolume_{0};
   int clockTtsFadeVolume_{-1};
   int clockTtsLastMinute_{-1};
