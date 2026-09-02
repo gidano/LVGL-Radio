@@ -1579,6 +1579,8 @@ String LogoManager::currentPath() const { return currentPath_; }
 
 String LogoManager::currentSource() const { return selectedSource_; }
 
+bool LogoManager::busy() const { return task_ != nullptr || browserPending_; }
+
 bool LogoManager::needsBrowserImport() const {
   return isRemote(selectedSource_) && sourceFailed(selectedSource_);
 }

@@ -26,6 +26,7 @@ class LogoManager {
 
   String currentPath() const;
   String currentSource() const;
+  bool busy() const;
   bool needsBrowserImport() const;
   bool queueBrowserPng(const String& sourceUrl, const String& temporaryPath);
   bool enterMaintenance(uint32_t timeoutMs = 3500);
